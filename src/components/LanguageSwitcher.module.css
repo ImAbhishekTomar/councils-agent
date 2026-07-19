@@ -1,0 +1,61 @@
+.languageSwitcher {
+  position: relative;
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Light theme (default - for white header backgrounds) */
+.switcherTrigger {
+  background: transparent;
+  color: #333;
+  border: 1px solid #ccc;
+  padding: 4px 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition:
+    border-color 0.2s,
+    opacity 0.2s;
+}
+
+.switcherTrigger:hover {
+  border-color: #999;
+}
+
+.caret {
+  font-size: 0.6rem;
+}
+
+.switcherDropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: #ffffff;
+  border: 1px solid #ddd;
+  list-style: none;
+  padding: 4px 0;
+  min-width: 100%;
+  z-index: 1000;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.switcherOption {
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  color: #333;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.switcherOption:hover {
+  background: #f0f0f0;
+}
+
+.switcherOption.active {
+  color: var(--orange, #ff4500);
+}

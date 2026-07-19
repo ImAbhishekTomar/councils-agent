@@ -13,16 +13,20 @@
   },
   "dependencies": {
     "@xyflow/react": "^12.11.2",
+    "axios": "^1.18.1",
     "concurrently": "^10.0.3",
     "cors": "^2.8.6",
+    "d3": "^7.9.0",
     "express": "^5.2.1",
     "lucide-react": "^1.25.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "react-router-dom": "^7.18.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
+    "@types/d3": "^7.4.3",
     "@types/express": "^5.0.6",
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
