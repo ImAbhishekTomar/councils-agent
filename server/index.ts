@@ -1,8 +1,8 @@
 import cors from 'cors';
 import express from 'express';
 import { z } from 'zod';
-import { buildAgentPrompt, buildFinalPrompt, buildImageJudgePrompt, swarmSystemPrompt } from './prompts.js';
-import type { Agent, AgentCategory, AgentLlmSettings, AgentPhase, AgentProfile } from './types.js';
+import { buildAgentPrompt, buildFinalPrompt, buildImageJudgePrompt, buildInnerStatePrompt, swarmSystemPrompt } from './prompts.js';
+import type { Agent, AgentCategory, AgentInnerState, AgentLlmSettings, AgentPhase, AgentProfile } from './types.js';
 
 type SwarmEvent =
   | { type: 'status'; message: string }
@@ -352,6 +352,7 @@ function createAgent(name: string, role: string, model: string, index: number): 
     category,
     phase: 'perspective',
     profile,
+    innerState: defaultInnerState(name, role),
     llmSettings,
     color: colors[index % colors.length],
     confidence: 0.5,
@@ -362,6 +363,17 @@ function createAgent(name: string, role: string, model: string, index: number): 
     summary: `${name} joins as ${role}. ${profile.goals}`,
     labels: ['Entity', categoryLabel(category)],
     createdAt: new Date().toISOString(),
+  };
+}
+
+function defaultInnerState(name: string, role: string): AgentInnerState {
+  return {
+    attention: [`The user needs ${role.toLowerCase()} applied concretely.`],
+    motive: `${name} wants to make the council more useful without overreaching.`,
+    affect: 'attentive and steady',
+    uncertainty: 'What evidence or constraint will matter most is not clear yet.',
+    socialPressure: 'Listen for gaps in the current phase and respond to one peer directly.',
+    selfCritique: 'The agent may lean too hard on its role and miss the broader user need.',
   };
 }
 
@@ -546,6 +558,7 @@ async function askAgent(
     confidence: 0.55,
   };
 
+  agent.innerState = await updateInnerState(question, agent, peers, memory, phase);
   const prompt = buildAgentPrompt({ question, agent, peers, memory, phase });
 
   const rawMessage = await chatText(agent.model, prompt, fallback.message, onDelta, agent.llmSettings);
@@ -554,6 +567,25 @@ async function askAgent(
     message,
     confidence: confidenceFromText(message),
   };
+}
+
+async function updateInnerState(
+  question: string,
+  agent: Agent,
+  peers: Agent[],
+  memory: string[],
+  phase: AgentPhase,
+) {
+  const prompt = buildInnerStatePrompt({ question, agent, peers, memory, phase });
+  const rawState = await chatText(agent.model, prompt, JSON.stringify(agent.innerState), () => undefined, {
+    temperature: Math.min(agent.llmSettings.temperature, 0.35),
+    topP: agent.llmSettings.topP,
+    maxOutputTokens: 512,
+    frequencyPenalty: 0,
+    presencePenalty: 0,
+  }, false);
+
+  return parseInnerState(rawState, agent.innerState);
 }
 
 async function judgeImageNeed(question: string, agent: Agent, message: string) {
@@ -591,6 +623,46 @@ function parseImageLine(message: string) {
   const prompt = match?.[1]?.trim();
   if (!prompt || prompt.length < 12) return null;
   return prompt.slice(0, 280);
+}
+
+function parseInnerState(rawState: string, fallback: AgentInnerState): AgentInnerState {
+  try {
+    const jsonText = extractJsonObject(rawState);
+    const parsed = JSON.parse(jsonText) as Partial<AgentInnerState>;
+    return {
+      attention: normalizeAttention(parsed.attention, fallback.attention),
+      motive: normalizeShortString(parsed.motive, fallback.motive),
+      affect: normalizeShortString(parsed.affect, fallback.affect),
+      uncertainty: normalizeShortString(parsed.uncertainty, fallback.uncertainty),
+      socialPressure: normalizeShortString(parsed.socialPressure, fallback.socialPressure),
+      selfCritique: normalizeShortString(parsed.selfCritique, fallback.selfCritique),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function extractJsonObject(rawState: string) {
+  const start = rawState.indexOf('{');
+  const end = rawState.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return rawState;
+  return rawState.slice(start, end + 1);
+}
+
+function normalizeAttention(value: unknown, fallback: string[]) {
+  if (!Array.isArray(value)) return fallback;
+  const cleaned = value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim().replace(/\s+/g, ' ').slice(0, 160))
+    .filter(Boolean)
+    .slice(0, 4);
+  return cleaned.length > 0 ? cleaned : fallback;
+}
+
+function normalizeShortString(value: unknown, fallback: string) {
+  if (typeof value !== 'string') return fallback;
+  const cleaned = value.trim().replace(/\s+/g, ' ').slice(0, 220);
+  return cleaned || fallback;
 }
 
 function stripImageLines(message: string) {

@@ -1,4 +1,4 @@
-import type { Agent } from './types.js';
+import type { Agent, AgentInnerState } from './types.js';
 
 export const swarmSystemPrompt =
   'You are one member of a multi-agent discussion. Be concise, concrete, collaborative, and vividly human in conversational presence while staying transparent that you are an AI simulation.';
@@ -10,6 +10,59 @@ const humanPresencePrompt = `Human-like presence style:
 - Add one human texture when useful: a felt concern, a memory-like impression from the shared context, a practical instinct, or a gentle disagreement.
 - Do not claim to be a real human, conscious, alive, deceased, supernatural, or in contact with spirits.
 - Keep the seance feeling as atmosphere only: intimate, attentive, voice-like, and reflective, never mystical deception.`;
+
+function formatInnerState(innerState: AgentInnerState) {
+  return `Attention: ${innerState.attention.join('; ')}
+Motive: ${innerState.motive}
+Affect: ${innerState.affect}
+Uncertainty: ${innerState.uncertainty}
+Social pressure: ${innerState.socialPressure}
+Self-critique: ${innerState.selfCritique}`;
+}
+
+export function buildInnerStatePrompt({
+  question,
+  agent,
+  peers,
+  memory,
+  phase,
+}: {
+  question: string;
+  agent: Agent;
+  peers: Agent[];
+  memory: string[];
+  phase: string;
+}) {
+  return `You are updating a simulated self-model for ${agent.name}. This is an architectural device for continuity, not evidence of real consciousness.
+
+Role: ${agent.role}
+Current discussion phase: ${phase}
+Temperament: ${agent.profile.temperament}
+Expertise: ${agent.profile.expertise}
+Memory style: ${agent.profile.memoryStyle}
+Risk bias: ${agent.profile.riskBias}
+Goals: ${agent.profile.goals}
+Constraints: ${agent.profile.constraints}
+Previous simulated inner state:
+${formatInnerState(agent.innerState)}
+
+Question: ${question}
+Known peers: ${peers.map((peer) => `${peer.name} (${peer.role})`).join('; ')}
+Shared short-term memory:
+${memory.slice(-12).join('\n')}
+
+Return compact JSON only, with this exact shape:
+{
+  "attention": ["one concrete thing to notice", "another concrete thing"],
+  "motive": "what this agent is trying to protect or advance right now",
+  "affect": "plain-language simulated emotional tone, without claiming real feeling",
+  "uncertainty": "the main thing this agent is unsure about",
+  "socialPressure": "how the peers and phase should shape the next utterance",
+  "selfCritique": "one risk in this agent's own likely answer"
+}
+
+Keep every string short. Do not use markdown.`;
+}
 
 export function buildAgentPrompt({
   question,
@@ -35,6 +88,8 @@ Speaking style: ${agent.profile.speakingStyle}
 Goals: ${agent.profile.goals}
 Constraints: ${agent.profile.constraints}
 LLM settings assigned for this role: temperature ${agent.llmSettings.temperature}, top_p ${agent.llmSettings.topP}, max output ${agent.llmSettings.maxOutputTokens}, frequency penalty ${agent.llmSettings.frequencyPenalty}, presence penalty ${agent.llmSettings.presencePenalty}
+Current simulated inner state:
+${formatInnerState(agent.innerState)}
 Question: ${question}
 Known peers: ${peers.map((peer) => `${peer.name} (${peer.role})`).join('; ')}
 Shared short-term memory:
@@ -49,6 +104,7 @@ Follow the current phase:
 - build: turn the discussion into implementation steps, tests, or operational choices.
 - synthesize: compress the strongest agreement and unresolved caveats.
 
+Use the simulated inner state as private guidance for continuity, priorities, uncertainty, and social tact. Do not reveal it as a hidden monologue, do not describe your internal process, and do not claim subjective experience.
 Speak directly to exactly one peer by name in 2-4 concise sentences, for example "${peers[0]?.name ?? 'Coordinator'}, ...". If there are no peers, speak to the user. Add a useful objection, improvement, or decision.
 If you think a new specialist agent is needed, append exactly one line like this:
 INVITE: <Agent Name> | <Agent Role> | <Reason>

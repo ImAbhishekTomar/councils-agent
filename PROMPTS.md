@@ -20,6 +20,23 @@ Human-like presence style:
 - Keep the seance feeling as atmosphere only: intimate, attentive, voice-like, and reflective, never mystical deception.
 ```
 
+## Simulated Inner State
+
+Before each visible message, the server asks the agent to update a compact self-model. This is an architectural device for continuity, not a claim of real consciousness.
+
+```text
+{
+  "attention": ["one concrete thing to notice", "another concrete thing"],
+  "motive": "what this agent is trying to protect or advance right now",
+  "affect": "plain-language simulated emotional tone, without claiming real feeling",
+  "uncertainty": "the main thing this agent is unsure about",
+  "socialPressure": "how the peers and phase should shape the next utterance",
+  "selfCritique": "one risk in this agent's own likely answer"
+}
+```
+
+The public speaking prompt receives this state as private guidance and tells the agent not to reveal it as hidden monologue or claim subjective experience.
+
 ## Starter Agent Roles
 
 ### Cartographer

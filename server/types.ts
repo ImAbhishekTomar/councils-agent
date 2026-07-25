@@ -6,6 +6,7 @@ export type Agent = {
   category: AgentCategory;
   phase: AgentPhase;
   profile: AgentProfile;
+  innerState: AgentInnerState;
   llmSettings: AgentLlmSettings;
   color: string;
   confidence: number;
@@ -31,6 +32,15 @@ export type AgentProfile = {
   speakingStyle: string;
   goals: string;
   constraints: string;
+};
+
+export type AgentInnerState = {
+  attention: string[];
+  motive: string;
+  affect: string;
+  uncertainty: string;
+  socialPressure: string;
+  selfCritique: string;
 };
 
 export type AgentLlmSettings = {
