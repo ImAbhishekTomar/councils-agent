@@ -26,11 +26,18 @@ const openRouterBaseUrl = process.env.OPENROUTER_BASE_URL ?? 'https://openrouter
 const openRouterApiKey = process.env.OPENROUTER_API_KEY?.trim();
 const openRouterSiteUrl = process.env.OPENROUTER_SITE_URL ?? 'http://localhost:5173';
 const openRouterAppName = process.env.OPENROUTER_APP_NAME ?? 'Councils Agent Discussion';
-const configuredOpenRouterFreeModels = (process.env.OPENROUTER_FREE_MODELS ?? 'openrouter/free')
+const defaultOpenRouterFreeModels = [
+  'openrouter/free',
+  'inclusionai/ling-3.0-flash:free',
+  'poolside/laguna-s-2.1:free',
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'google/gemma-4-26b-a4b-it:free',
+];
+const configuredOpenRouterFreeModels = (process.env.OPENROUTER_FREE_MODELS ?? defaultOpenRouterFreeModels.join(','))
   .split(',')
   .map((model) => model.trim())
   .filter(isKnownFreeOpenRouterModel);
-const openRouterFreeModels = configuredOpenRouterFreeModels.length > 0 ? configuredOpenRouterFreeModels : ['openrouter/free'];
+const openRouterFreeModels = configuredOpenRouterFreeModels.length > 0 ? configuredOpenRouterFreeModels : defaultOpenRouterFreeModels;
 const imageGenerationUrl = process.env.IMAGE_GENERATION_URL ?? `${ollamaBaseUrl}/v1/images/generations`;
 const imageGenerationModel = (process.env.IMAGE_GENERATION_MODEL ?? 'x/flux2-klein:latest').trim();
 const imageGenerationFallbackModel = (process.env.IMAGE_GENERATION_FALLBACK_MODEL ?? 'x/flux2-klein:latest').trim();
