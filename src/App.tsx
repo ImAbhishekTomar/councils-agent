@@ -148,11 +148,11 @@ function App() {
         if (nextModels.length) {
           const modelIds = nextModels.map((option) => option.id);
           const preferredModel =
-            data.ok && modelIds.includes('qwen3:8b')
-              ? 'qwen3:8b'
-              : data.openRouterConfigured && modelIds.includes('openrouter/free')
+            data.openRouterConfigured && modelIds.includes('openrouter/free')
                 ? 'openrouter/free'
-                : modelIds[0];
+                : data.ok && modelIds.includes('qwen3:8b')
+                  ? 'qwen3:8b'
+                  : modelIds[0];
           setModel(preferredModel);
           setStatus(`Models ready: ${nextModels.length} available`);
         } else {
