@@ -56,8 +56,8 @@ Primary logo assets live in `src/assets/logo/`:
 ## Quick Start
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 Open [http://localhost:5173](http://localhost:5173).
@@ -78,7 +78,7 @@ ollama pull llama3.2:latest
 4. Run Councils:
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 By default, the backend expects Ollama at:
@@ -90,7 +90,7 @@ http://127.0.0.1:11434
 Override it if needed:
 
 ```bash
-OLLAMA_URL=http://127.0.0.1:11434 npm run dev
+OLLAMA_URL=http://127.0.0.1:11434 pnpm dev
 ```
 
 When the app opens, the Model dropdown only shows local Ollama models if the Ollama API is reachable.
@@ -108,7 +108,7 @@ OPENROUTER_API_KEY=sk-or-your-key
 Then run:
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 Default OpenRouter free choices:
@@ -136,11 +136,11 @@ COUNCILS_SERVER_TOKEN_RUN_LIMIT=2
 ## Development Commands
 
 ```bash
-npm run dev        # start web + API
-npm run dev:web    # start Vite only
-npm run dev:server # start Express API only
-npm run build      # TypeScript + production build
-npm run lint       # oxlint
+pnpm dev        # start web + API
+pnpm dev:web    # start Vite only
+pnpm dev:server # start Express API only
+pnpm build      # TypeScript + production build
+pnpm lint       # oxlint
 ```
 
 ## Architecture
@@ -180,9 +180,9 @@ Suggested workflow:
 
 1. Fork the repo.
 2. Create a branch.
-3. Run `npm install`.
+3. Run `pnpm install`.
 4. Make focused changes.
-5. Run `npm run build` and `npm run lint`.
+5. Run `pnpm build` and `pnpm lint`.
 6. Open a pull request with screenshots for UI changes.
 
 Please avoid committing secrets. Put keys in `.env` or `server/.env`; env files are ignored.
