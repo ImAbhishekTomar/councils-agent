@@ -1,8 +1,12 @@
 import cors from 'cors';
 import express from 'express';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { z } from 'zod';
 import { buildAgentPrompt, buildFinalPrompt, buildImageJudgePrompt, buildInnerStatePrompt, swarmSystemPrompt } from './prompts.js';
 import type { Agent, AgentCategory, AgentInnerState, AgentLlmSettings, AgentPhase, AgentProfile } from './types.js';
+
+loadEnvFiles();
 
 type SwarmEvent =
   | { type: 'status'; message: string }
@@ -18,6 +22,28 @@ type SwarmEvent =
   | { type: 'final_delta'; id: string; delta: string }
   | { type: 'final'; id: string; answer: string; confidence: number }
   | { type: 'error'; message: string };
+
+function loadEnvFiles() {
+  [join(process.cwd(), '.env'), join(process.cwd(), 'server/.env')].forEach((envPath) => {
+    if (!existsSync(envPath)) return;
+
+    readFileSync(envPath, 'utf8')
+      .split(/\r?\n/)
+      .forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) return;
+
+        const separatorIndex = trimmed.indexOf('=');
+        if (separatorIndex === -1) return;
+
+        const key = trimmed.slice(0, separatorIndex).trim();
+        const rawValue = trimmed.slice(separatorIndex + 1).trim();
+        if (!key || process.env[key] !== undefined) return;
+
+        process.env[key] = rawValue.replace(/^['"]|['"]$/g, '');
+      });
+  });
+}
 
 const app = express();
 const port = Number(process.env.PORT ?? 8787);
