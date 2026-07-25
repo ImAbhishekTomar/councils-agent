@@ -8,7 +8,7 @@
 
 Councils is a local-first multi-agent discussion workspace. It lets several Ollama or OpenRouter-backed agents frame a question, challenge assumptions, invite missing specialists, visualize the discussion graph, and synthesize a final answer.
 
-**Demo:** [Sample demo URL coming soon](https://example.com)
+**Demo:** [DEMO LIVE](https://councils-agent.vercel.app/)
 
 ## About The Agent Workspace
 
