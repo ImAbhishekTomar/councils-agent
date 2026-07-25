@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import councilIcon from '../assets/logo/councils-icon-light.png';
 import HistoryDatabase from '../components/HistoryDatabase';
 import LanguageSwitcher from '../components/LanguageSwitcher';
@@ -26,6 +26,9 @@ function Home() {
         </div>
         <div className="nav-links">
           <LanguageSwitcher />
+          <Link to="/settings" className="github-link">
+            Settings
+          </Link>
           <a href="https://github.com/ImAbhishekTomar/councils-agent" target="_blank" rel="noreferrer" className="github-link">
             {t('nav.visitGithub')} <span className="arrow">↗</span>
           </a>

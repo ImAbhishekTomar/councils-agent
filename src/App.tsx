@@ -1,8 +1,10 @@
-import { CircleStop, Database, GitBranch, MessageSquareText, Play, RadioTower, RotateCcw, Sparkles } from 'lucide-react';
+import { CircleStop, Database, GitBranch, MessageSquareText, Play, RadioTower, RotateCcw, Settings, Sparkles } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import './App.css';
 import councilsIcon from './assets/logo/councils-icon-light.png';
 import GraphPanel from './GraphPanel';
+import { getClientId, getProviderTokens, settingsAvailableForThisBuild } from './store/providerTokens';
 import { clearPendingUpload, getPendingUpload } from './store/pendingUpload';
 
 type Agent = {
@@ -106,6 +108,7 @@ type ModelOption = {
 
 const apiBase = import.meta.env.VITE_API_BASE ?? 'http://localhost:8787';
 const defaultQuestion = 'dose god is exists?';
+const providerSettingsEnabled = settingsAvailableForThisBuild();
 
 function colorForAgentIndex(index: number) {
   const hue = (index * 137.508 + 162) % 360;
@@ -315,9 +318,14 @@ function App() {
       avatarAbortControllerRef.current = new AbortController();
     }
 
+    const tokens = providerSettingsEnabled ? getProviderTokens() : { openRouterToken: '', huggingFaceToken: '' };
     fetch(`${apiBase}/api/agents/avatar`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Councils-Client-Id': getClientId(),
+        ...(tokens.huggingFaceToken ? { 'X-HuggingFace-Token': tokens.huggingFaceToken } : {}),
+      },
       body: JSON.stringify({ agent }),
       signal: avatarAbortControllerRef.current.signal,
     })
@@ -489,7 +497,7 @@ function App() {
     [appendDelta, appendTranscript, failTranscriptImage, finishStreamingMessage, finishTranscriptImage, requestAgentAvatar, startStreamingMessage, startTranscriptImage],
   );
 
-  const startRun = useCallback(() => {
+  const startRun = useCallback(async () => {
     if (!model) {
       setStatus('No model selected. Start Ollama or set OPENROUTER_API_KEY.');
       return;
@@ -500,20 +508,40 @@ function App() {
     setStatus('Opening council session');
     const clampedAgentTarget = Math.max(0, agentTarget);
     const clampedRounds = Math.max(0, rounds);
-    const params = new URLSearchParams({
-      q: question,
-      model,
-      agents: String(clampedAgentTarget),
-      rounds: String(clampedRounds),
-    });
-    const source = new EventSource(`${apiBase}/api/swarm/stream?${params.toString()}`);
-    eventSourceRef.current = source;
-    source.addEventListener('swarm', (message) => handleSwarmEvent(JSON.parse(message.data) as SwarmEvent));
-    source.onerror = () => {
-      setStatus('Council stream disconnected. Check that the server and Ollama are running.');
+    try {
+      const tokens = providerSettingsEnabled ? getProviderTokens() : { openRouterToken: '', huggingFaceToken: '' };
+      const sessionResponse = await fetch(`${apiBase}/api/swarm/sessions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Councils-Client-Id': getClientId(),
+          ...(tokens.openRouterToken ? { 'X-OpenRouter-Token': tokens.openRouterToken } : {}),
+          ...(tokens.huggingFaceToken ? { 'X-HuggingFace-Token': tokens.huggingFaceToken } : {}),
+        },
+        body: JSON.stringify({
+          q: question,
+          model,
+          agents: clampedAgentTarget,
+          rounds: clampedRounds,
+        }),
+      });
+      const session = await sessionResponse.json() as { ok?: boolean; streamId?: string; error?: string };
+      if (!sessionResponse.ok || !session.ok || !session.streamId) {
+        throw new Error(session.error ?? 'Could not start council stream.');
+      }
+
+      const source = new EventSource(`${apiBase}/api/swarm/stream/${encodeURIComponent(session.streamId)}`);
+      eventSourceRef.current = source;
+      source.addEventListener('swarm', (message) => handleSwarmEvent(JSON.parse(message.data) as SwarmEvent));
+      source.onerror = () => {
+        setStatus('Council stream disconnected. Check that the server and Ollama are running.');
+        setIsRunning(false);
+        source.close();
+      };
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not start council stream.');
       setIsRunning(false);
-      source.close();
-    };
+    }
   }, [agentTarget, handleSwarmEvent, model, question, resetRun, rounds]);
 
   // If we arrived here from Home's "Start Council", prefill the prompt and run.
@@ -549,6 +577,9 @@ function App() {
               <small>Agent Discussion</small>
             </span>
           </button>
+          <Link className="nav-settings-link" to="/settings" title="Provider settings">
+            <Settings size={17} />
+          </Link>
         </div>
 
         <div className="nav-controls">

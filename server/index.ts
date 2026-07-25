@@ -1,7 +1,7 @@
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
 import { InferenceClient, type InferenceProviderOrPolicy } from '@huggingface/inference';
 import cors from 'cors';
-import express from 'express';
+import express, { type Request } from 'express';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -55,6 +55,11 @@ const openRouterApiKey = process.env.OPENROUTER_API_KEY?.trim();
 const openRouterSiteUrl = process.env.OPENROUTER_SITE_URL ?? 'http://localhost:5173';
 const openRouterAppName = process.env.OPENROUTER_APP_NAME ?? 'Councils Agent Discussion';
 const openRouterRequestDelayMs = Number(process.env.OPENROUTER_REQUEST_DELAY_MS ?? 1500);
+const userSuppliedTokensEnabled =
+  process.env.COUNCILS_ALLOW_USER_TOKENS === 'true' ||
+  (process.env.NODE_ENV === 'production' && process.env.COUNCILS_ALLOW_USER_TOKENS !== 'false');
+const serverTokenRunLimit = Number(process.env.COUNCILS_SERVER_TOKEN_RUN_LIMIT ?? 4);
+const streamSessionTtlMs = Number(process.env.COUNCILS_STREAM_SESSION_TTL_MS ?? 120_000);
 let openRouterNextRequestAt = 0;
 const defaultOpenRouterFreeModels = [
   'openrouter/free',
@@ -106,6 +111,8 @@ const avatarRequestDelayMs = Number(process.env.HF_AVATAR_REQUEST_DELAY_MS ?? 15
 const unlimitedRoundRecursionLimit = Number(process.env.LANGGRAPH_UNLIMITED_RECURSION_LIMIT ?? 10_000);
 const huggingFaceClient = huggingFaceToken ? new InferenceClient(huggingFaceToken) : null;
 let huggingFaceNextAvatarRequestAt = 0;
+const serverTokenUsageByClient = new Map<string, number>();
+const pendingSwarmSessions = new Map<string, SwarmSession>();
 
 app.use(cors());
 app.use(express.json());
@@ -182,11 +189,27 @@ const avatarAgentSchema = z.object({
 
 type SwarmInput = z.infer<typeof swarmQuerySchema>;
 type SendSwarmEvent = (event: SwarmEvent) => void;
+type TokenSource = 'user' | 'server' | 'none';
+
+type ProviderCredentials = {
+  clientId: string;
+  openRouterApiKey?: string;
+  openRouterSource: TokenSource;
+  huggingFaceToken?: string;
+  huggingFaceSource: TokenSource;
+};
+
+type SwarmSession = {
+  input: SwarmInput;
+  credentials: ProviderCredentials;
+  expiresAt: number;
+};
 
 type SwarmGraphRuntime = {
   send: SendSwarmEvent;
   imageTasks: Promise<void>[];
   imageCount: number;
+  credentials: ProviderCredentials;
 };
 
 const SwarmGraphState = Annotation.Root({
@@ -198,6 +221,61 @@ const SwarmGraphState = Annotation.Root({
 });
 
 type SwarmGraphStateValue = typeof SwarmGraphState.State;
+
+function resolveProviderCredentials(request: Request): ProviderCredentials {
+  const clientId = normalizeClientId(headerValue(request, 'x-councils-client-id'));
+  const userOpenRouterToken = userSuppliedTokensEnabled ? headerValue(request, 'x-openrouter-token')?.trim() : '';
+  const userHuggingFaceToken = userSuppliedTokensEnabled ? headerValue(request, 'x-huggingface-token')?.trim() : '';
+
+  return {
+    clientId,
+    openRouterApiKey: userOpenRouterToken || openRouterApiKey,
+    openRouterSource: userOpenRouterToken ? 'user' : openRouterApiKey ? 'server' : 'none',
+    huggingFaceToken: userHuggingFaceToken || huggingFaceToken,
+    huggingFaceSource: userHuggingFaceToken ? 'user' : huggingFaceToken ? 'server' : 'none',
+  };
+}
+
+function reserveServerOpenRouterRun(input: SwarmInput, credentials: ProviderCredentials) {
+  if (!isOpenRouterModel(input.model) || credentials.openRouterSource !== 'server') {
+    return { ok: true };
+  }
+
+  if (serverTokenRunLimit <= 0) {
+    return { ok: false, error: 'Server OpenRouter token fallback is disabled. Add your own OpenRouter token in Settings.' };
+  }
+
+  const usedRuns = serverTokenUsageByClient.get(credentials.clientId) ?? 0;
+  if (usedRuns >= serverTokenRunLimit) {
+    return { ok: false, error: 'Server OpenRouter token limit reached. Add your own OpenRouter token in Settings to continue.' };
+  }
+
+  serverTokenUsageByClient.set(credentials.clientId, usedRuns + 1);
+  return { ok: true };
+}
+
+function serverTokenRunsRemaining(clientId: string) {
+  if (serverTokenRunLimit <= 0) return 0;
+  return Math.max(0, serverTokenRunLimit - (serverTokenUsageByClient.get(clientId) ?? 0));
+}
+
+function headerValue(request: Request, name: string) {
+  const value = request.headers[name];
+  if (Array.isArray(value)) return value[0] ?? '';
+  return value ?? '';
+}
+
+function normalizeClientId(value: string | undefined) {
+  const cleaned = value?.trim().replace(/[^a-zA-Z0-9._:-]/g, '').slice(0, 120);
+  return cleaned || 'anonymous';
+}
+
+function cleanupExpiredSwarmSessions() {
+  const now = Date.now();
+  for (const [streamId, session] of pendingSwarmSessions) {
+    if (session.expiresAt < now) pendingSwarmSessions.delete(streamId);
+  }
+}
 
 app.get('/api/models', async (_request, response) => {
   const providerStatus = {
@@ -222,7 +300,7 @@ app.get('/api/models', async (_request, response) => {
   try {
     const result = await fetch(`${ollamaBaseUrl}/api/tags`);
     if (!result.ok) throw new Error(`Ollama returned ${result.status}`);
-    const data = await result.json();
+    const data = await result.json() as { models?: { name: string }[] };
     providerStatus.ollama.available = true;
     const ollamaModels = (data.models ?? []).map((model: { name: string }) => model.name);
     ollamaModels.forEach((model: string) => {
@@ -239,6 +317,7 @@ app.get('/api/models', async (_request, response) => {
       modelOptions,
       providers: providerStatus,
       openRouterConfigured: Boolean(openRouterApiKey),
+      userSuppliedTokensEnabled,
     });
   } catch (error) {
     providerStatus.ollama.error = error instanceof Error ? error.message : 'Could not reach Ollama.';
@@ -248,9 +327,40 @@ app.get('/api/models', async (_request, response) => {
       modelOptions,
       providers: providerStatus,
       openRouterConfigured: Boolean(openRouterApiKey),
+      userSuppliedTokensEnabled,
       error: providerStatus.ollama.error,
     });
   }
+});
+
+app.post('/api/swarm/sessions', (request, response) => {
+  const parsed = swarmQuerySchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid swarm request.' });
+    return;
+  }
+
+  const credentials = resolveProviderCredentials(request);
+  const limitCheck = reserveServerOpenRouterRun(parsed.data, credentials);
+  if (!limitCheck.ok) {
+    response.status(429).json({ ok: false, error: limitCheck.error });
+    return;
+  }
+
+  cleanupExpiredSwarmSessions();
+  const streamId = globalThis.crypto.randomUUID();
+  pendingSwarmSessions.set(streamId, {
+    input: parsed.data,
+    credentials,
+    expiresAt: Date.now() + streamSessionTtlMs,
+  });
+
+  response.json({
+    ok: true,
+    streamId,
+    serverTokenRunsRemaining: serverTokenRunsRemaining(credentials.clientId),
+    usingServerOpenRouterToken: credentials.openRouterSource === 'server' && isOpenRouterModel(parsed.data.model),
+  });
 });
 
 // Simulation history for the Home screen's HistoryDatabase panel.
@@ -267,7 +377,7 @@ app.post('/api/agents/avatar', async (request, response) => {
   }
 
   try {
-    const url = await generateAgentAvatar(parsed.data);
+    const url = await generateAgentAvatar(parsed.data, resolveProviderCredentials(request));
     response.json({ ok: true, url });
   } catch (error) {
     response.status(503).json({
@@ -277,8 +387,41 @@ app.post('/api/agents/avatar', async (request, response) => {
   }
 });
 
+app.get('/api/swarm/stream/:streamId', async (request, response) => {
+  const session = pendingSwarmSessions.get(request.params.streamId);
+  pendingSwarmSessions.delete(request.params.streamId);
+
+  if (!session || session.expiresAt < Date.now()) {
+    openSwarmErrorStream(response, 'Council stream session expired. Start a new run.');
+    return;
+  }
+
+  await streamSwarmRun(request, response, session.input, session.credentials);
+});
+
 app.get('/api/swarm/stream', async (request, response) => {
   const parsed = swarmQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    openSwarmErrorStream(response, parsed.error.issues[0]?.message ?? 'Invalid swarm request.');
+    return;
+  }
+
+  const credentials = resolveProviderCredentials(request);
+  const limitCheck = reserveServerOpenRouterRun(parsed.data, credentials);
+  if (!limitCheck.ok) {
+    openSwarmErrorStream(response, limitCheck.error ?? 'Server OpenRouter token limit reached.');
+    return;
+  }
+
+  await streamSwarmRun(request, response, parsed.data, credentials);
+});
+
+async function streamSwarmRun(
+  request: Request,
+  response: express.Response,
+  input: SwarmInput,
+  credentials: ProviderCredentials,
+) {
   let closed = false;
 
   response.setHeader('Content-Type', 'text/event-stream');
@@ -292,35 +435,41 @@ app.get('/api/swarm/stream', async (request, response) => {
     response.write(`data: ${JSON.stringify(event)}\n\n`);
   };
 
-  if (!parsed.success) {
-    send({ type: 'error', message: parsed.error.issues[0]?.message ?? 'Invalid swarm request.' });
-    response.end();
-    return;
-  }
-
   request.on('close', () => {
     closed = true;
     if (!response.writableEnded) response.end();
   });
 
   try {
-    await runSwarm(parsed.data, send);
+    await runSwarm(input, send, credentials);
   } catch (error) {
     send({ type: 'error', message: error instanceof Error ? error.message : 'Swarm run failed.' });
   } finally {
     closed = true;
     if (!response.writableEnded) response.end();
   }
-});
+}
+
+function openSwarmErrorStream(response: express.Response, message: string) {
+  response.setHeader('Content-Type', 'text/event-stream');
+  response.setHeader('Cache-Control', 'no-cache');
+  response.setHeader('Connection', 'keep-alive');
+  response.flushHeaders();
+  response.write('event: swarm\n');
+  response.write(`data: ${JSON.stringify({ type: 'error', message } satisfies SwarmEvent)}\n\n`);
+  response.end();
+}
 
 async function runSwarm(
   input: SwarmInput,
   send: SendSwarmEvent,
+  credentials: ProviderCredentials,
 ) {
   const runtime: SwarmGraphRuntime = {
     send,
     imageTasks: [],
     imageCount: 0,
+    credentials,
   };
   const graph = buildSwarmGraph(runtime);
   await graph.invoke(
@@ -340,7 +489,7 @@ function buildSwarmGraph(runtime: SwarmGraphRuntime) {
   return new StateGraph(SwarmGraphState)
     .addNode('initialize_council', (state: SwarmGraphStateValue) => initializeCouncil(state.input, runtime.send))
     .addNode('discussion_round', (state: SwarmGraphStateValue) => runDiscussionRoundNode(state, runtime))
-    .addNode('final_answer', (state: SwarmGraphStateValue) => runFinalNode(state, runtime.send))
+    .addNode('final_answer', (state: SwarmGraphStateValue) => runFinalNode(state, runtime))
     .addEdge(START, 'initialize_council')
     .addEdge('initialize_council', 'discussion_round')
     .addConditionalEdges('discussion_round', routeAfterDiscussionRound, ['discussion_round', 'final_answer'])
@@ -363,9 +512,6 @@ async function initializeCouncil(input: SwarmInput, send: SendSwarmEvent): Promi
   ];
 
   send({ type: 'status', message: `Starting with one atom and ${agentLimitText(input)} on ${input.model}.` });
-  if (isOpenRouterModel(input.model) && !openRouterApiKey) {
-    send({ type: 'status', message: 'OpenRouter model selected, but OPENROUTER_API_KEY is not set. Using fallback text until an API key is configured.' });
-  }
   send({ type: 'agent_created', agent: initialAgent, reason: 'Initial atom started to assess the question before inviting anyone.' });
 
   return { agents, memory };
@@ -388,7 +534,7 @@ async function runDiscussionRoundNode(
 
     const messageId = `msg-${round}-${index}-${Date.now()}`;
     runtime.send({ type: 'message_start', id: messageId, from: agent.id, to: peers.map((peer) => peer.id), label });
-    const thought = await askAgent(state.input.q, agent, peers, memory, phase, (delta) =>
+    const thought = await askAgent(state.input.q, agent, peers, memory, phase, runtime.credentials, (delta) =>
       runtime.send({ type: 'message_delta', id: messageId, delta }),
     );
     agent.confidence = thought.confidence;
@@ -401,7 +547,7 @@ async function runDiscussionRoundNode(
     const edgeLabel = relationshipLabel(agent, phase);
     spokenTargets.forEach((target) => runtime.send({ type: 'edge', from: agent.id, to: target.id, label: edgeLabel }));
 
-    const judgedImagePrompt = runtime.imageCount < maxImagesPerRun ? await judgeImageNeed(state.input.q, agent, thought.message) : null;
+    const judgedImagePrompt = runtime.imageCount < maxImagesPerRun ? await judgeImageNeed(state.input.q, agent, thought.message, runtime.credentials) : null;
     if (judgedImagePrompt) {
       runtime.imageCount += 1;
       runtime.imageTasks.push(queueAgentImage(messageId, agent.id, judgedImagePrompt, runtime.send));
@@ -467,12 +613,13 @@ function recursionLimitForInput(input: SwarmInput) {
 
 async function runFinalNode(
   state: SwarmGraphStateValue,
-  send: SendSwarmEvent,
+  runtime: SwarmGraphRuntime,
 ): Promise<Partial<SwarmGraphStateValue>> {
+  const { send } = runtime;
   send({ type: 'status', message: 'Synthesizing answer from shared memory.' });
   const finalId = `final-${Date.now()}`;
   send({ type: 'final_start', id: finalId });
-  const final = await synthesize(state.input.q, state.agents, state.memory, state.input.model, (delta) =>
+  const final = await synthesize(state.input.q, state.agents, state.memory, state.input.model, runtime.credentials, (delta) =>
     send({ type: 'final_delta', id: finalId, delta }),
   );
   send({ type: 'final', id: finalId, answer: final.answer, confidence: final.confidence });
@@ -544,6 +691,13 @@ function categoryLabel(category: AgentCategory) {
   if (category === 'trading') return 'Trading Analysis';
   if (category === 'creative') return 'Creative Writing';
   return 'General Chat';
+}
+
+function settingsForCategory(category: AgentCategory): AgentLlmSettings {
+  if (category === 'coding') return { temperature: 0.18, topP: 0.95, maxOutputTokens: 8192, frequencyPenalty: 0, presencePenalty: 0 };
+  if (category === 'trading') return { temperature: 0.22, topP: 0.9, maxOutputTokens: 4096, frequencyPenalty: 0, presencePenalty: 0 };
+  if (category === 'creative') return { temperature: 0.88, topP: 0.96, maxOutputTokens: 4096, frequencyPenalty: 0.35, presencePenalty: 0.55 };
+  return { temperature: 0.55, topP: 0.94, maxOutputTokens: 3072, frequencyPenalty: 0.12, presencePenalty: 0.12 };
 }
 
 function settingsForAgent(role: string, category: AgentCategory, profile: AgentProfile): AgentLlmSettings {
@@ -746,6 +900,7 @@ async function askAgent(
   peers: Agent[],
   memory: string[],
   phase: AgentPhase,
+  credentials: ProviderCredentials,
   onDelta: (delta: string) => void,
 ) {
   const fallback = {
@@ -753,10 +908,10 @@ async function askAgent(
     confidence: 0.55,
   };
 
-  agent.innerState = await updateInnerState(question, agent, peers, memory, phase);
+  agent.innerState = await updateInnerState(question, agent, peers, memory, phase, credentials);
   const prompt = buildAgentPrompt({ question, agent, peers, memory, phase });
 
-  const rawMessage = await chatText(agent.model, prompt, fallback.message, onDelta, agent.llmSettings);
+  const rawMessage = await chatText(agent.model, prompt, fallback.message, onDelta, agent.llmSettings, credentials);
   const invites = parseInviteLines(rawMessage);
   const satisfaction = parseSatisfactionLine(rawMessage, invites.length > 0);
   const message = stripControlLines(rawMessage);
@@ -775,6 +930,7 @@ async function updateInnerState(
   peers: Agent[],
   memory: string[],
   phase: AgentPhase,
+  credentials: ProviderCredentials,
 ) {
   const prompt = buildInnerStatePrompt({ question, agent, peers, memory, phase });
   const rawState = await chatText(agent.model, prompt, JSON.stringify(agent.innerState), () => undefined, {
@@ -783,12 +939,12 @@ async function updateInnerState(
     maxOutputTokens: 512,
     frequencyPenalty: 0,
     presencePenalty: 0,
-  }, false);
+  }, credentials, false);
 
   return parseInnerState(rawState, agent.innerState);
 }
 
-async function judgeImageNeed(question: string, agent: Agent, message: string) {
+async function judgeImageNeed(question: string, agent: Agent, message: string, credentials: ProviderCredentials) {
   if (!/\b(visual|image|diagram|layout|map|interface|screen|scene|graph|network|architecture|comparison|sketch|draw)\b/i.test(message)) {
     return null;
   }
@@ -800,7 +956,7 @@ async function judgeImageNeed(question: string, agent: Agent, message: string) {
     maxOutputTokens: 512,
     frequencyPenalty: 0,
     presencePenalty: 0,
-  }, false);
+  }, credentials, false);
   return parseImageLine(result);
 }
 
@@ -979,17 +1135,20 @@ async function generateLowResolutionImageWithModel(prompt: string, model: string
   }
 }
 
-async function generateAgentAvatar(agent: z.infer<typeof avatarAgentSchema>) {
-  if (!huggingFaceClient || !huggingFaceToken) {
+async function generateAgentAvatar(agent: z.infer<typeof avatarAgentSchema>, credentials: ProviderCredentials) {
+  if (!credentials.huggingFaceToken) {
     throw new Error('HUGGINGFACE_KEY is not set. Using node color fallback.');
   }
 
   await waitForHuggingFaceAvatarTurn();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), avatarImageTimeoutMs);
+  const client = credentials.huggingFaceSource === 'server' && huggingFaceClient
+    ? huggingFaceClient
+    : new InferenceClient(credentials.huggingFaceToken);
 
   try {
-    return await huggingFaceClient.textToImage(
+    return await client.textToImage(
       {
         provider: avatarImageProvider,
         model: avatarImageModel,
@@ -1061,6 +1220,7 @@ async function synthesize(
   agents: Agent[],
   memory: string[],
   model: string,
+  credentials: ProviderCredentials,
   onDelta: (delta: string) => void,
 ) {
   const fallback = {
@@ -1070,7 +1230,7 @@ async function synthesize(
 
   const prompt = buildFinalPrompt({ question, agents, memory });
 
-  const answer = await chatText(model, prompt, fallback.answer, onDelta, settingsForCategory('general'));
+  const answer = await chatText(model, prompt, fallback.answer, onDelta, settingsForCategory('general'), credentials);
   return { answer, confidence: averageConfidence(agents) };
 }
 
@@ -1080,10 +1240,11 @@ async function chatText(
   fallback: string,
   onDelta: (delta: string) => void,
   settings: AgentLlmSettings,
+  credentials: ProviderCredentials,
   stream = true,
 ) {
   if (isOpenRouterModel(model)) {
-    return chatTextOpenRouter(model, prompt, fallback, onDelta, settings, stream);
+    return chatTextOpenRouter(model, prompt, fallback, onDelta, settings, credentials, stream);
   }
 
   return chatTextOllama(model, prompt, fallback, onDelta, settings, stream);
@@ -1099,11 +1260,12 @@ async function chatTextOpenRouter(
   fallback: string,
   onDelta: (delta: string) => void,
   settings: AgentLlmSettings,
+  credentials: ProviderCredentials,
   stream = true,
 ) {
   try {
-    if (!openRouterApiKey) {
-      throw new Error('OPENROUTER_API_KEY is required for OpenRouter models.');
+    if (!credentials.openRouterApiKey) {
+      throw new Error('An OpenRouter API key is required for OpenRouter models.');
     }
     if (!isAllowedOpenRouterFreeModel(model)) {
       throw new Error(`OpenRouter model "${model}" is blocked because only free models are allowed.`);
@@ -1114,7 +1276,7 @@ async function chatTextOpenRouter(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${openRouterApiKey}`,
+        Authorization: `Bearer ${credentials.openRouterApiKey}`,
         'HTTP-Referer': openRouterSiteUrl,
         'X-Title': openRouterAppName,
       },
