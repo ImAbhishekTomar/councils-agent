@@ -18,11 +18,13 @@ export type Agent = {
   summary: string;
   labels: string[];
   createdAt: string;
+  satisfied: boolean;
+  satisfactionReason: string | null;
 };
 
 export type AgentCategory = 'coding' | 'trading' | 'creative' | 'general';
 
-export type AgentPhase = 'frame' | 'perspective' | 'critique' | 'build' | 'synthesize';
+export type AgentPhase = 'discussion' | 'frame' | 'perspective' | 'critique' | 'build' | 'synthesize';
 
 export type AgentProfile = {
   temperament: string;

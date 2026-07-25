@@ -11,7 +11,7 @@ type Agent = {
   role: string;
   model: string;
   category: 'coding' | 'trading' | 'creative' | 'general';
-  phase: 'frame' | 'perspective' | 'critique' | 'build' | 'synthesize';
+  phase: 'discussion' | 'frame' | 'perspective' | 'critique' | 'build' | 'synthesize';
   profile: {
     temperament: string;
     expertise: string;
@@ -37,6 +37,7 @@ type Agent = {
   summary: string;
   labels: string[];
   createdAt: string;
+  avatarUrl?: string;
 };
 
 type SwarmEvent =
@@ -105,25 +106,33 @@ type ModelOption = {
 
 const apiBase = import.meta.env.VITE_API_BASE ?? 'http://localhost:8787';
 const defaultQuestion = 'dose god is exists?';
-const councilColors = ['#10b981', '#8b5cf6', '#06b6d4', '#0ea5e9', '#d946ad'];
+
+function colorForAgentIndex(index: number) {
+  const hue = (index * 137.508 + 162) % 360;
+  const saturation = 68 + (index % 3) * 7;
+  const lightness = 50 + (index % 4) * 4;
+  return `hsl(${Math.round(hue)} ${saturation}% ${lightness}%)`;
+}
 
 function App() {
   const [question, setQuestion] = useState(defaultQuestion);
   const [model, setModel] = useState('');
   const [models, setModels] = useState<ModelOption[]>([]);
-  const [agentTarget, setAgentTarget] = useState(5);
-  const [rounds, setRounds] = useState(3);
+  const [agentTarget, setAgentTarget] = useState(0);
+  const [rounds, setRounds] = useState(0);
   const [nodes, setNodes] = useState<AppNode[]>([]);
   const [edges, setEdges] = useState<AppEdge[]>([]);
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [agents, setAgents] = useState<Record<string, Agent>>({});
-  const [activeAgentId, setActiveAgentId] = useState<string>();
+  const [selectedAgentId, setSelectedAgentId] = useState<string>();
+  const [activeAgentIds, setActiveAgentIds] = useState<string[]>([]);
   const [finalAnswer, setFinalAnswer] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const [autoStart, setAutoStart] = useState(false);
   const [status, setStatus] = useState('Idle');
   const [activeSideTab, setActiveSideTab] = useState<SidePanelTab>('transcript');
   const eventSourceRef = useRef<EventSource | null>(null);
+  const avatarAbortControllerRef = useRef<AbortController | null>(null);
   const agentsRef = useRef<Record<string, Agent>>({});
   const transcriptRef = useRef<HTMLDivElement | null>(null);
 
@@ -169,10 +178,10 @@ function App() {
     setNodes((currentNodes) =>
       currentNodes.map((node) => ({
         ...node,
-        data: { ...node.data, active: node.id === activeAgentId },
+        data: { ...node.data, active: activeAgentIds.includes(node.id) },
       })),
     );
-  }, [activeAgentId]);
+  }, [activeAgentIds]);
 
   useEffect(() => {
     if (nodes.length < 2) return;
@@ -191,11 +200,14 @@ function App() {
   const resetRun = useCallback(() => {
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
+    avatarAbortControllerRef.current?.abort();
+    avatarAbortControllerRef.current = new AbortController();
     setNodes([]);
     setEdges([]);
     setTranscript([]);
     setAgents({});
-    setActiveAgentId(undefined);
+    setSelectedAgentId(undefined);
+    setActiveAgentIds([]);
     setFinalAnswer('');
     setIsRunning(false);
     setStatus('Idle');
@@ -204,7 +216,10 @@ function App() {
   const stopRun = useCallback(() => {
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
+    avatarAbortControllerRef.current?.abort();
+    avatarAbortControllerRef.current = new AbortController();
     setIsRunning(false);
+    setActiveAgentIds([]);
     setStatus('Stopped');
   }, []);
 
@@ -295,6 +310,55 @@ function App() {
     );
   }, []);
 
+  const requestAgentAvatar = useCallback((agent: Agent) => {
+    if (!avatarAbortControllerRef.current || avatarAbortControllerRef.current.signal.aborted) {
+      avatarAbortControllerRef.current = new AbortController();
+    }
+
+    fetch(`${apiBase}/api/agents/avatar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent }),
+      signal: avatarAbortControllerRef.current.signal,
+    })
+      .then(async (response) => {
+        const data = await response.json() as { ok?: boolean; url?: string };
+        if (!response.ok || !data.ok || !data.url) return;
+
+        setAgents((current) => {
+          const currentAgent = current[agent.id];
+          if (!currentAgent) return current;
+          return { ...current, [agent.id]: { ...currentAgent, avatarUrl: data.url } };
+        });
+        setNodes((current) =>
+          current.map((node) =>
+            node.id === agent.id
+              ? {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    agent: { ...node.data.agent, avatarUrl: data.url },
+                  },
+                }
+              : node,
+          ),
+        );
+        setTranscript((current) =>
+          current.map((item) =>
+            item.agent?.id === agent.id
+              ? {
+                  ...item,
+                  agent: { ...item.agent, avatarUrl: data.url },
+                }
+              : item,
+          ),
+        );
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+      });
+  }, []);
+
   const handleSwarmEvent = useCallback(
     (event: SwarmEvent) => {
       if (event.type === 'status') {
@@ -305,7 +369,7 @@ function App() {
 
       if (event.type === 'agent_created') {
         // Prefer the (richer) join reason as the node summary when present.
-        const nextColor = councilColors[Object.keys(agentsRef.current).length % councilColors.length];
+        const nextColor = colorForAgentIndex(Object.keys(agentsRef.current).length);
         const agent: Agent = { ...event.agent, color: nextColor, summary: event.reason || event.agent.summary };
         setAgents((current) => ({ ...current, [agent.id]: agent }));
         setNodes((current) => layoutMindMapNodes([
@@ -323,6 +387,7 @@ function App() {
           kind: 'status',
           text: `${event.agent.name} joined: ${event.reason}`,
         });
+        requestAgentAvatar(agent);
         return;
       }
 
@@ -332,7 +397,7 @@ function App() {
       }
 
       if (event.type === 'message_start') {
-        setActiveAgentId(event.from);
+        setActiveAgentIds((current) => (current.includes(event.from) ? current : [...current, event.from]));
         startStreamingMessage({
           id: event.id,
           agent: agentsRef.current[event.from],
@@ -362,13 +427,14 @@ function App() {
                   ...node,
                   data: {
                     ...node.data,
-                    active: true,
+                    active: false,
                     agent: { ...node.data.agent, confidence: event.confidence },
                   },
                 }
-              : { ...node, data: { ...node.data, active: false } },
+              : node,
           ),
         );
+        setActiveAgentIds((current) => current.filter((id) => id !== event.from));
         finishStreamingMessage(event.id, event.confidence, event.message);
         return;
       }
@@ -407,7 +473,7 @@ function App() {
         setFinalAnswer(event.answer);
         setStatus(`Consensus confidence ${Math.round(event.confidence * 100)}%`);
         setIsRunning(false);
-        setActiveAgentId(undefined);
+        setActiveAgentIds([]);
         finishStreamingMessage(event.id, event.confidence, event.answer);
         return;
       }
@@ -415,11 +481,12 @@ function App() {
       if (event.type === 'error') {
         setStatus(event.message);
         setIsRunning(false);
+        setActiveAgentIds([]);
         appendTranscript({ kind: 'error', text: event.message });
         eventSourceRef.current?.close();
       }
     },
-    [appendDelta, appendTranscript, failTranscriptImage, finishStreamingMessage, finishTranscriptImage, startStreamingMessage, startTranscriptImage],
+    [appendDelta, appendTranscript, failTranscriptImage, finishStreamingMessage, finishTranscriptImage, requestAgentAvatar, startStreamingMessage, startTranscriptImage],
   );
 
   const startRun = useCallback(() => {
@@ -431,12 +498,13 @@ function App() {
     resetRun();
     setIsRunning(true);
     setStatus('Opening council session');
-    const clampedAgentTarget = Math.min(10, Math.max(3, agentTarget));
+    const clampedAgentTarget = Math.max(0, agentTarget);
+    const clampedRounds = Math.max(0, rounds);
     const params = new URLSearchParams({
       q: question,
       model,
       agents: String(clampedAgentTarget),
-      rounds: String(rounds),
+      rounds: String(clampedRounds),
     });
     const source = new EventSource(`${apiBase}/api/swarm/stream?${params.toString()}`);
     eventSourceRef.current = source;
@@ -504,8 +572,7 @@ function App() {
           <label>
             <span>Agents</span>
             <input
-              min="3"
-              max="10"
+              min="0"
               type="number"
               value={agentTarget}
               onChange={(event) => setAgentTarget(Number(event.target.value))}
@@ -513,7 +580,7 @@ function App() {
           </label>
           <label>
             <span>Rounds</span>
-            <input min="1" max="5" type="number" value={rounds} onChange={(event) => setRounds(Number(event.target.value))} />
+            <input min="0" type="number" value={rounds} onChange={(event) => setRounds(Number(event.target.value))} />
           </label>
         </div>
 
@@ -554,10 +621,11 @@ function App() {
           <GraphPanel
             nodes={nodes}
             edges={edges}
-            activeAgentId={activeAgentId}
+            activeAgentIds={activeAgentIds}
+            selectedAgentId={selectedAgentId}
             showEdgeLabels={showEdgeLabels}
             onToggleEdgeLabels={() => setShowEdgeLabels((current) => !current)}
-            onSelectAgent={(id) => setActiveAgentId(id)}
+            onSelectAgent={(id) => setSelectedAgentId(id)}
           />
         </section>
       </section>
@@ -596,7 +664,14 @@ function App() {
                 {transcript.map((item) => (
                   <article className={`line ${item.kind}`} key={item.id}>
                     <div className="line-meta">
-                      <span>{item.agent?.name ?? item.kind}</span>
+                      <span className="line-agent">
+                        {item.agent && (
+                          <span className="line-agent-avatar" style={{ '--agent-color': item.agent.color } as React.CSSProperties}>
+                            {item.agent.avatarUrl && <img alt="" loading="lazy" src={item.agent.avatarUrl} />}
+                          </span>
+                        )}
+                        <span>{item.agent?.name ?? item.kind}</span>
+                      </span>
                       {typeof item.confidence === 'number' && <span>{Math.round(item.confidence * 100)}%</span>}
                     </div>
                     <p>

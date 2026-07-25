@@ -1,7 +1,7 @@
 import axios from 'axios';
 
-// Mirrors Councils's axios service. baseURL points at the existing Express
-// backend; override with VITE_API_BASE_URL when the LangGraph backend lands.
+// Mirrors Councils's axios service. baseURL points at the Express/LangGraph
+// backend; override with VITE_API_BASE_URL for another API host.
 const baseURL = import.meta.env.VITE_API_BASE_URL ?? import.meta.env.VITE_API_BASE ?? 'http://localhost:8787';
 
 const service = axios.create({

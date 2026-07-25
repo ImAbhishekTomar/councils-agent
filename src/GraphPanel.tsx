@@ -7,7 +7,7 @@ type Agent = {
   role: string;
   model: string;
   category: 'coding' | 'trading' | 'creative' | 'general';
-  phase: 'frame' | 'perspective' | 'critique' | 'build' | 'synthesize';
+  phase: 'discussion' | 'frame' | 'perspective' | 'critique' | 'build' | 'synthesize';
   profile: {
     temperament: string;
     expertise: string;
@@ -33,6 +33,7 @@ type Agent = {
   summary: string;
   labels: string[];
   createdAt: string;
+  avatarUrl?: string;
 };
 
 type AgentNodeData = {
@@ -46,6 +47,7 @@ type GraphNode = {
   label: string;
   subtitle: string;
   color: string;
+  avatarUrl?: string;
   active: boolean;
   raw: Agent;
   x?: number;
@@ -80,7 +82,8 @@ type AppEdge = {
 type GraphPanelProps = {
   nodes: { id: string; data: AgentNodeData; position?: { x: number; y: number }; draggable?: boolean }[];
   edges: AppEdge[];
-  activeAgentId?: string;
+  activeAgentIds: string[];
+  selectedAgentId?: string;
   onSelectAgent: (id?: string) => void;
   showEdgeLabels: boolean;
   onToggleEdgeLabels: () => void;
@@ -106,14 +109,18 @@ function renderNodeValue(value: string | null) {
 }
 
 function nodeRadius() {
-  return 13;
+  return 22;
 }
 
 function truncateNodeLabel(label: string) {
   return label.length > 18 ? `${label.slice(0, 18)}...` : label;
 }
 
-function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels, onToggleEdgeLabels }: GraphPanelProps) {
+function nodeClipId(id: string) {
+  return `agent-avatar-clip-${id.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+}
+
+function GraphPanel({ nodes, edges, activeAgentIds, selectedAgentId, onSelectAgent, showEdgeLabels, onToggleEdgeLabels }: GraphPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const simulationRef = useRef<d3.Simulation<GraphNode, GraphLink> | null>(null);
@@ -126,6 +133,7 @@ function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels
         label: node.data.agent.name,
         subtitle: node.data.agent.role,
         color: node.data.agent.color,
+        avatarUrl: node.data.agent.avatarUrl,
         active: node.data.active,
         raw: node.data.agent,
         x: node.position?.x,
@@ -177,7 +185,7 @@ function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels
     },
     [nodes],
   );
-  const selectedAgent = useMemo(() => nodes.find((node) => node.id === activeAgentId)?.data.agent, [activeAgentId, nodes]);
+  const selectedAgent = useMemo(() => nodes.find((node) => node.id === selectedAgentId)?.data.agent, [selectedAgentId, nodes]);
 
   useEffect(() => {
     const observer = new ResizeObserver(() => {
@@ -201,7 +209,7 @@ function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphNodes.length, graphLinks.length, showEdgeLabels, activeAgentId]);
+  }, [graphNodes.length, graphLinks.length, showEdgeLabels, activeAgentIds, selectedAgentId]);
 
   useEffect(() => {
     renderGraph();
@@ -212,7 +220,7 @@ function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphNodes, graphLinks, showEdgeLabels, activeAgentId]);
+  }, [graphNodes, graphLinks, showEdgeLabels, activeAgentIds, selectedAgentId]);
 
   function getLinkPath(link: GraphLink) {
     const { source, target, curvature } = link as GraphLink & { source: GraphNode; target: GraphNode };
@@ -255,6 +263,43 @@ function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels
     svg.selectAll('*').remove();
     svg.attr('width', width).attr('height', height).attr('viewBox', `0 0 ${width} ${height}`);
 
+    const defs = svg.append('defs');
+    const activeGradient = defs
+      .append('linearGradient')
+      .attr('id', 'active-agent-gradient')
+      .attr('x1', '-80%')
+      .attr('y1', '0%')
+      .attr('x2', '180%')
+      .attr('y2', '100%');
+    activeGradient
+      .append('animateTransform')
+      .attr('attributeName', 'gradientTransform')
+      .attr('type', 'rotate')
+      .attr('from', '0 0.5 0.5')
+      .attr('to', '360 0.5 0.5')
+      .attr('dur', '9s')
+      .attr('repeatCount', 'indefinite');
+
+    const gradientStops = [
+      { offset: '0%', values: '#0b3954;#087e8b;#bfd7ea;#ff5a5f;#c81d25;#0b3954' },
+      { offset: '28%', values: '#087e8b;#bfd7ea;#ff5a5f;#c81d25;#0b3954;#087e8b' },
+      { offset: '58%', values: '#bfd7ea;#ff5a5f;#c81d25;#0b3954;#087e8b;#bfd7ea' },
+      { offset: '100%', values: '#ff5a5f;#c81d25;#0b3954;#087e8b;#bfd7ea;#ff5a5f' },
+    ];
+    gradientStops.forEach((stop) => {
+      const stopNode = activeGradient.append('stop').attr('offset', stop.offset).attr('stop-color', stop.values.split(';')[0]).attr('stop-opacity', 1);
+      stopNode.append('animate').attr('attributeName', 'stop-color').attr('values', stop.values).attr('dur', '7s').attr('repeatCount', 'indefinite');
+    });
+    graphNodes.forEach((node) => {
+      defs
+        .append('clipPath')
+        .attr('id', nodeClipId(node.id))
+        .append('circle')
+        .attr('r', nodeRadius())
+        .attr('cx', 0)
+        .attr('cy', 0);
+    });
+
     const g = svg.append('g');
 
     const zoom = d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.15, 4]).on('zoom', (event) => {
@@ -285,16 +330,17 @@ function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels
     // When an agent is selected, highlight its edges + direct neighbours and dim
     // everything else. Sets are computed from the untouched `raw` ids so they stay
     // valid after d3.forceLink mutates link.source/target into node objects.
-    const hasSelection = Boolean(activeAgentId);
+    const activeAgentSet = new Set(activeAgentIds);
+    const hasSelection = Boolean(selectedAgentId);
     const neighbourIds = new Set<string>();
     const highlightedEdgeIds = new Set<string>();
-    if (activeAgentId) {
-      neighbourIds.add(activeAgentId);
+    if (selectedAgentId) {
+      neighbourIds.add(selectedAgentId);
       edges.forEach((edge) => {
-        if (edge.raw.source === activeAgentId) {
+        if (edge.raw.source === selectedAgentId) {
           neighbourIds.add(edge.raw.target);
           highlightedEdgeIds.add(edge.id);
-        } else if (edge.raw.target === activeAgentId) {
+        } else if (edge.raw.target === selectedAgentId) {
           neighbourIds.add(edge.raw.source);
           highlightedEdgeIds.add(edge.id);
         }
@@ -320,7 +366,7 @@ function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels
       .force('link', d3.forceLink<GraphNode, GraphLink>(edges).id((d) => d.id).distance((d) => 150 + (d.pairTotal - 1) * 50).strength(1))
       .force('charge', d3.forceManyBody().strength(-400))
       .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collide', d3.forceCollide(50))
+      .force('collide', d3.forceCollide(66))
       .force('x', d3.forceX(width / 2).strength(0.04))
       .force('y', d3.forceY(height / 2).strength(0.04));
 
@@ -378,7 +424,7 @@ function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels
       .data(graphNodes)
       .enter()
       .append('g')
-      .attr('class', (d) => `graph-node${d.id === activeAgentId ? ' is-selected' : ''}${hasSelection && !neighbourIds.has(d.id) ? ' is-dimmed' : ''}`)
+      .attr('class', (d) => `graph-node${d.id === selectedAgentId ? ' is-selected' : ''}${activeAgentSet.has(d.id) ? ' is-speaking' : ''}${hasSelection && !neighbourIds.has(d.id) ? ' is-dimmed' : ''}`)
       .attr('cursor', 'pointer')
       .on('mouseenter', (event) => {
         d3.select(event.currentTarget).classed('is-hovered', true);
@@ -413,9 +459,30 @@ function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels
       .append('circle')
       .attr('class', 'graph-node-dot')
       .attr('r', nodeRadius())
-      .attr('fill', (d) => d.color)
+      .attr('fill', (d) => (activeAgentSet.has(d.id) ? 'url(#active-agent-gradient)' : d.color))
       .attr('stroke', '#0f172a')
-      .attr('stroke-width', (d) => (d.id === activeAgentId ? 5 : 3));
+      .attr('stroke-width', 3);
+
+    node
+      .filter((d) => Boolean(d.avatarUrl) && !activeAgentSet.has(d.id))
+      .append('image')
+      .attr('class', 'graph-node-avatar')
+      .attr('href', (d) => d.avatarUrl ?? '')
+      .attr('x', -nodeRadius())
+      .attr('y', -nodeRadius())
+      .attr('width', nodeRadius() * 2)
+      .attr('height', nodeRadius() * 2)
+      .attr('clip-path', (d) => `url(#${nodeClipId(d.id)})`)
+      .attr('preserveAspectRatio', 'xMidYMid slice');
+
+    node
+      .filter((d) => Boolean(d.avatarUrl) && !activeAgentSet.has(d.id))
+      .append('circle')
+      .attr('class', 'graph-node-avatar-ring')
+      .attr('r', nodeRadius())
+      .attr('fill', 'none')
+      .attr('stroke', '#0f172a')
+      .attr('stroke-width', 3);
 
     const nodeLabels = nodeGroup
       .selectAll<SVGTextElement, GraphNode>('text')
@@ -424,7 +491,7 @@ function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels
       .append('text')
       .attr('class', 'graph-node-label')
       .text((d) => truncateNodeLabel(d.label))
-      .attr('dx', 14)
+      .attr('dx', 24)
       .attr('dy', 4);
 
     simulation.on('tick', () => {
@@ -504,6 +571,18 @@ function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels
           </div>
 
           <div className="node-details-body">
+            <div className="node-details-identity">
+              <div className="node-details-avatar" style={{ '--agent-color': selectedAgent.color } as CSSProperties}>
+                {selectedAgent.avatarUrl && <img alt={`${selectedAgent.name} avatar`} loading="lazy" src={selectedAgent.avatarUrl} />}
+              </div>
+              <div>
+                <strong>{selectedAgent.name}</strong>
+                <span>{selectedAgent.role}</span>
+              </div>
+            </div>
+
+            <hr className="node-divider" />
+
             <dl className="node-field-grid">
               <dt>Name:</dt>
               <dd className="node-field-name">{selectedAgent.name}</dd>
@@ -547,7 +626,8 @@ function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels
               <dd>{selectedAgent.profile.speakingStyle}</dd>
               <dt>LLM:</dt>
               <dd>
-                temp {selectedAgent.llmSettings.temperature}, top_p {selectedAgent.llmSettings.topP}, max {selectedAgent.llmSettings.maxOutputTokens}
+                temp {selectedAgent.llmSettings.temperature}, top_p {selectedAgent.llmSettings.topP}, max {selectedAgent.llmSettings.maxOutputTokens}, freq{' '}
+                {selectedAgent.llmSettings.frequencyPenalty}, presence {selectedAgent.llmSettings.presencePenalty}
               </dd>
             </dl>
 

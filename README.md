@@ -18,7 +18,7 @@ The current prototype includes:
 
 - A dark animated landing page with Councils branding.
 - A React playground for live agent discussion.
-- Server-sent event streaming from a Node/Express orchestrator.
+- Server-sent event streaming from a Node/Express + LangGraph orchestrator.
 - Local Ollama model discovery.
 - OpenRouter support for free models only.
 - Dynamic specialist creation through `INVITE:` lines.
@@ -130,20 +130,21 @@ The current prototype is intentionally small:
 
 - `src/pages/Home.tsx` and `src/pages/Home.css`: branded landing page.
 - `src/App.tsx` and `src/App.css`: live playground UI.
-- `server/index.ts`: Express API, SSE orchestration, model providers, image generation hooks.
+- `server/index.ts`: Express API, LangGraph state graph, SSE orchestration, model providers, image generation hooks.
 - `server/prompts.ts`: agent, final synthesis, image judge, and simulated inner-state prompts.
 - `server/types.ts`: agent and profile types.
 - `PROMPTS.md`: prompt mirror for easier editing.
 
-Agent loop, simplified:
+LangGraph agent flow, simplified:
 
-1. Create coordinator and starter specialists.
-2. For each phase, choose peers for each agent.
-3. Update the agent's simulated inner state.
-4. Stream the agent message to the UI.
-5. Parse any specialist invite.
-6. Add graph edges for addressed peers.
-7. Synthesize the final answer.
+1. Create one initial atom.
+2. Let that atom decide whether it can answer alone or needs to invite experts.
+3. Create invited agents as standalone nodes without drawing edges.
+4. Stream each agent message to the UI.
+5. Draw graph edges only when one agent addresses another in conversation.
+6. Parse any number of specialist invites from any agent.
+7. Keep looping until agents report satisfaction or a nonzero round cap is reached.
+8. Synthesize the final answer in the terminal graph node.
 
 ## Contributing
 
@@ -179,4 +180,4 @@ Research and conceptual references:
 - Patrick Butlin et al., [“Consciousness in Artificial Intelligence: Insights from the Science of Consciousness”](https://arxiv.org/abs/2308.08708), used as a cautionary reference for treating AI consciousness claims carefully.
 - Yoshua Bengio, [“The Consciousness Prior”](https://arxiv.org/abs/1709.08568), a useful background reference for attention, bottlenecks, and compact conscious-state-like representations.
 
-Related engineering patterns include AutoGen-style multi-agent chat, CrewAI role teams, LangGraph state graphs, debate/committee prompting, and visible reasoning topology tools.
+Related engineering patterns include AutoGen-style multi-agent chat, CrewAI role teams, LangGraph state graphs, debate/committee prompting, and visible reasoning topology tools. The current backend uses LangGraph for the council phase graph while keeping the model provider calls and SSE event contract local to the Express server.

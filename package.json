@@ -12,6 +12,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@huggingface/inference": "^4.13.23",
+    "@langchain/langgraph": "^1.4.8",
     "@xyflow/react": "^12.11.2",
     "axios": "^1.18.1",
     "concurrently": "^10.0.3",
