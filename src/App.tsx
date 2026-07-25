@@ -104,7 +104,7 @@ const councilColors = ['#10b981', '#8b5cf6', '#06b6d4', '#0ea5e9', '#d946ad'];
 function App() {
   const [question, setQuestion] = useState(defaultQuestion);
   const [model, setModel] = useState('qwen3:8b');
-  const [models, setModels] = useState<string[]>(['qwen3:8b', 'llama3.2:latest', 'mistral:latest']);
+  const [models, setModels] = useState<string[]>(['openrouter/free', 'qwen3:8b', 'llama3.2:latest', 'mistral:latest']);
   const [agentTarget, setAgentTarget] = useState(5);
   const [rounds, setRounds] = useState(3);
   const [nodes, setNodes] = useState<AppNode[]>([]);
@@ -135,14 +135,20 @@ function App() {
   useEffect(() => {
     fetch(`${apiBase}/api/models`)
       .then((response) => response.json())
-      .then((data: { models?: string[] }) => {
+      .then((data: { ok?: boolean; models?: string[]; openRouterConfigured?: boolean }) => {
         if (data.models?.length) {
           setModels(data.models);
-          setModel(data.models.includes('qwen3:8b') ? 'qwen3:8b' : data.models[0]);
+          const preferredModel =
+            data.ok && data.models.includes('qwen3:8b')
+              ? 'qwen3:8b'
+              : data.openRouterConfigured && data.models.includes('openrouter/free')
+                ? 'openrouter/free'
+                : data.models[0];
+          setModel(preferredModel);
         }
       })
       .catch(() => {
-        setStatus('Ollama model discovery failed. Councils can still show fallback discussion events.');
+        setStatus('Model discovery failed. Councils can still show fallback discussion events.');
       });
   }, []);
 

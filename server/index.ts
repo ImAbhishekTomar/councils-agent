@@ -22,6 +22,15 @@ type SwarmEvent =
 const app = express();
 const port = Number(process.env.PORT ?? 8787);
 const ollamaBaseUrl = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
+const openRouterBaseUrl = process.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1';
+const openRouterApiKey = process.env.OPENROUTER_API_KEY?.trim();
+const openRouterSiteUrl = process.env.OPENROUTER_SITE_URL ?? 'http://localhost:5173';
+const openRouterAppName = process.env.OPENROUTER_APP_NAME ?? 'Councils Agent Discussion';
+const configuredOpenRouterFreeModels = (process.env.OPENROUTER_FREE_MODELS ?? 'openrouter/free')
+  .split(',')
+  .map((model) => model.trim())
+  .filter(isKnownFreeOpenRouterModel);
+const openRouterFreeModels = configuredOpenRouterFreeModels.length > 0 ? configuredOpenRouterFreeModels : ['openrouter/free'];
 const imageGenerationUrl = process.env.IMAGE_GENERATION_URL ?? `${ollamaBaseUrl}/v1/images/generations`;
 const imageGenerationModel = (process.env.IMAGE_GENERATION_MODEL ?? 'x/flux2-klein:latest').trim();
 const imageGenerationFallbackModel = (process.env.IMAGE_GENERATION_FALLBACK_MODEL ?? 'x/flux2-klein:latest').trim();
@@ -92,18 +101,21 @@ const phasePlan: { phase: AgentPhase; label: string }[] = [
 ];
 
 app.get('/api/models', async (_request, response) => {
+  const defaultOllamaModels = ['qwen3:8b', 'llama3.2:latest', 'mistral:latest'];
   try {
     const result = await fetch(`${ollamaBaseUrl}/api/tags`);
     if (!result.ok) throw new Error(`Ollama returned ${result.status}`);
     const data = await result.json();
     response.json({
       ok: true,
-      models: (data.models ?? []).map((model: { name: string }) => model.name),
+      models: [...openRouterFreeModels, ...(data.models ?? []).map((model: { name: string }) => model.name)],
+      openRouterConfigured: Boolean(openRouterApiKey),
     });
   } catch (error) {
     response.json({
       ok: false,
-      models: ['qwen3:8b', 'llama3.2:latest', 'mistral:latest'],
+      models: [...openRouterFreeModels, ...defaultOllamaModels],
+      openRouterConfigured: Boolean(openRouterApiKey),
       error: error instanceof Error ? error.message : 'Could not reach Ollama.',
     });
   }
@@ -177,6 +189,9 @@ async function runSwarm(
   let imageCount = 0;
 
   send({ type: 'status', message: `Starting with ${agents.length} initial agents and a max of ${input.agents} total agents on ${input.model}.` });
+  if (isOpenRouterModel(input.model) && !openRouterApiKey) {
+    send({ type: 'status', message: 'OpenRouter model selected, but OPENROUTER_API_KEY is not set. Using fallback text until an API key is configured.' });
+  }
   send({ type: 'agent_created', agent: initialAgent, reason: 'Initial coordinator agent started to assess and invite specialists dynamically.' });
   starterSpecialists.forEach((specialist, index) => {
     const agent = agents[index + 1];
@@ -797,6 +812,116 @@ async function chatText(
   settings: AgentLlmSettings,
   stream = true,
 ) {
+  if (isOpenRouterModel(model)) {
+    return chatTextOpenRouter(model, prompt, fallback, onDelta, settings, stream);
+  }
+
+  return chatTextOllama(model, prompt, fallback, onDelta, settings, stream);
+}
+
+function isOpenRouterModel(model: string) {
+  return openRouterFreeModels.includes(model) || isKnownFreeOpenRouterModel(model);
+}
+
+async function chatTextOpenRouter(
+  model: string,
+  prompt: string,
+  fallback: string,
+  onDelta: (delta: string) => void,
+  settings: AgentLlmSettings,
+  stream = true,
+) {
+  try {
+    if (!openRouterApiKey) {
+      throw new Error('OPENROUTER_API_KEY is required for OpenRouter models.');
+    }
+    if (!isAllowedOpenRouterFreeModel(model)) {
+      throw new Error(`OpenRouter model "${model}" is blocked because only free models are allowed.`);
+    }
+
+    const result = await fetch(`${openRouterBaseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${openRouterApiKey}`,
+        'HTTP-Referer': openRouterSiteUrl,
+        'X-Title': openRouterAppName,
+      },
+      body: JSON.stringify({
+        model,
+        stream,
+        temperature: settings.temperature,
+        top_p: settings.topP,
+        max_tokens: settings.maxOutputTokens,
+        messages: [
+          { role: 'system', content: swarmSystemPrompt },
+          { role: 'user', content: prompt },
+        ],
+      }),
+    });
+
+    if (!result.ok) throw new Error(`OpenRouter returned ${result.status}: ${await summarizeResponseError(result)}`);
+
+    if (!stream) {
+      const packet = await result.json() as { choices?: { message?: { content?: string } }[] };
+      const cleaned = packet.choices?.[0]?.message?.content?.trim();
+      if (!cleaned) throw new Error('OpenRouter returned an empty message.');
+      return cleaned;
+    }
+
+    let fullText = '';
+    const reader = result.body?.getReader();
+    if (!reader) throw new Error('OpenRouter response did not include a stream body.');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const payload = trimmed.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        const packet = JSON.parse(payload) as { choices?: { delta?: { content?: string } }[] };
+        const delta = packet.choices?.[0]?.delta?.content ?? '';
+        if (delta) {
+          fullText += delta;
+          onDelta(delta);
+        }
+      }
+    }
+
+    const cleaned = fullText.trim();
+    if (!cleaned) throw new Error('OpenRouter returned an empty message.');
+    return cleaned;
+  } catch {
+    onDelta(fallback);
+    return fallback;
+  }
+}
+
+function isAllowedOpenRouterFreeModel(model: string) {
+  return openRouterFreeModels.includes(model) || isKnownFreeOpenRouterModel(model);
+}
+
+function isKnownFreeOpenRouterModel(model: string) {
+  return model === 'openrouter/free' || model.endsWith(':free');
+}
+
+async function chatTextOllama(
+  model: string,
+  prompt: string,
+  fallback: string,
+  onDelta: (delta: string) => void,
+  settings: AgentLlmSettings,
+  stream = true,
+) {
   try {
     const result = await fetch(`${ollamaBaseUrl}/api/chat`, {
       method: 'POST',
@@ -854,6 +979,18 @@ async function chatText(
     onDelta(fallback);
     return fallback;
   }
+}
+
+async function summarizeResponseError(result: Response) {
+  const errorText = await result.text();
+  try {
+    const parsed = JSON.parse(errorText) as { error?: { message?: string } | string };
+    if (typeof parsed.error === 'string') return parsed.error;
+    if (parsed.error?.message) return parsed.error.message;
+  } catch {
+    // Fall through to trimmed text.
+  }
+  return errorText.trim().slice(0, 220) || 'Unknown provider error.';
 }
 
 function ollamaOptions(settings: AgentLlmSettings) {

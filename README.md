@@ -17,12 +17,28 @@ The API runs at http://localhost:8787 and expects Ollama at `http://127.0.0.1:11
 OLLAMA_URL=http://127.0.0.1:11434 npm run dev
 ```
 
+OpenRouter is also supported for free models only. The default OpenRouter model is `openrouter/free`, which routes to currently available free models.
+
+```bash
+OPENROUTER_API_KEY=sk-or-... npm run dev
+```
+
+Optional OpenRouter settings:
+
+```bash
+OPENROUTER_FREE_MODELS=openrouter/free
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_SITE_URL=http://localhost:5173
+OPENROUTER_APP_NAME="Councils Agent Discussion"
+```
+
 ## What This Prototype Does
 
 - React single-page playground with question, model, agent count, and round controls.
 - Live mind-map using `@xyflow/react`, with draggable circular agents and basic overlap relaxation.
 - Server-sent events from a small Node/Express discussion orchestrator.
 - Local Ollama model discovery.
+- OpenRouter support through `openrouter/free` with a guard that blocks non-free OpenRouter models.
 - Agent roles: Cartographer, Skeptic, Builder, Memory Keeper, Synthesizer.
 - Dynamic specialist creation when an agent invites a missing role.
 - Chat-style transcript with token streaming from each speaking agent.
