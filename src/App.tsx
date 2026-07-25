@@ -97,14 +97,20 @@ type AppEdge = {
 
 type SidePanelTab = 'transcript' | 'plan' | 'system';
 
+type ModelOption = {
+  id: string;
+  label: string;
+  provider: 'ollama' | 'openrouter';
+};
+
 const apiBase = import.meta.env.VITE_API_BASE ?? 'http://localhost:8787';
 const defaultQuestion = 'Should we launch now or phase the rollout?';
 const councilColors = ['#10b981', '#8b5cf6', '#06b6d4', '#0ea5e9', '#d946ad'];
 
 function App() {
   const [question, setQuestion] = useState(defaultQuestion);
-  const [model, setModel] = useState('qwen3:8b');
-  const [models, setModels] = useState<string[]>(['openrouter/free', 'qwen3:8b', 'llama3.2:latest', 'mistral:latest']);
+  const [model, setModel] = useState('');
+  const [models, setModels] = useState<ModelOption[]>([]);
   const [agentTarget, setAgentTarget] = useState(5);
   const [rounds, setRounds] = useState(3);
   const [nodes, setNodes] = useState<AppNode[]>([]);
@@ -135,16 +141,23 @@ function App() {
   useEffect(() => {
     fetch(`${apiBase}/api/models`)
       .then((response) => response.json())
-      .then((data: { ok?: boolean; models?: string[]; openRouterConfigured?: boolean }) => {
-        if (data.models?.length) {
-          setModels(data.models);
+      .then((data: { ok?: boolean; models?: string[]; modelOptions?: ModelOption[]; openRouterConfigured?: boolean }) => {
+        const nextModels = data.modelOptions ?? data.models?.map((id) => ({ id, label: id, provider: id.startsWith('openrouter/') || id.endsWith(':free') ? 'openrouter' as const : 'ollama' as const })) ?? [];
+        setModels(nextModels);
+
+        if (nextModels.length) {
+          const modelIds = nextModels.map((option) => option.id);
           const preferredModel =
-            data.ok && data.models.includes('qwen3:8b')
+            data.ok && modelIds.includes('qwen3:8b')
               ? 'qwen3:8b'
-              : data.openRouterConfigured && data.models.includes('openrouter/free')
+              : data.openRouterConfigured && modelIds.includes('openrouter/free')
                 ? 'openrouter/free'
-                : data.models[0];
+                : modelIds[0];
           setModel(preferredModel);
+          setStatus(`Models ready: ${nextModels.length} available`);
+        } else {
+          setModel('');
+          setStatus('No model provider available. Start Ollama or set OPENROUTER_API_KEY.');
         }
       })
       .catch(() => {
@@ -410,6 +423,11 @@ function App() {
   );
 
   const startRun = useCallback(() => {
+    if (!model) {
+      setStatus('No model selected. Start Ollama or set OPENROUTER_API_KEY.');
+      return;
+    }
+
     resetRun();
     setIsRunning(true);
     setStatus('Opening council session');
@@ -472,10 +490,13 @@ function App() {
           </label>
           <label>
             <span>Model</span>
-            <select value={model} onChange={(event) => setModel(event.target.value)}>
-              {models.map((modelName) => (
-                <option key={modelName} value={modelName}>
-                  {modelName}
+            <select value={model} onChange={(event) => setModel(event.target.value)} disabled={models.length === 0}>
+              {models.length === 0 ? (
+                <option value="">No provider available</option>
+              ) : null}
+              {models.map((modelOption) => (
+                <option key={modelOption.id} value={modelOption.id}>
+                  {modelOption.label}
                 </option>
               ))}
             </select>
@@ -510,7 +531,7 @@ function App() {
                 <CircleStop size={18} /> Stop Council
               </button>
             ) : (
-              <button className="primary-button" type="button" onClick={startRun}>
+              <button className="primary-button" type="button" onClick={startRun} disabled={!model}>
                 <Play size={18} /> Start Council
               </button>
             )}

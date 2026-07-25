@@ -101,22 +101,55 @@ const phasePlan: { phase: AgentPhase; label: string }[] = [
 ];
 
 app.get('/api/models', async (_request, response) => {
-  const defaultOllamaModels = ['qwen3:8b', 'llama3.2:latest', 'mistral:latest'];
+  const providerStatus = {
+    ollama: { available: false, error: null as string | null },
+    openRouter: {
+      available: Boolean(openRouterApiKey),
+      error: openRouterApiKey ? null : 'OPENROUTER_API_KEY is not set.',
+    },
+  };
+  const modelOptions: { id: string; label: string; provider: 'ollama' | 'openrouter' }[] = [];
+
+  if (openRouterApiKey) {
+    openRouterFreeModels.forEach((model) => {
+      modelOptions.push({
+        id: model,
+        label: model === 'openrouter/free' ? 'OpenRouter Free Router' : `${model} (free)`,
+        provider: 'openrouter',
+      });
+    });
+  }
+
   try {
     const result = await fetch(`${ollamaBaseUrl}/api/tags`);
     if (!result.ok) throw new Error(`Ollama returned ${result.status}`);
     const data = await result.json();
+    providerStatus.ollama.available = true;
+    const ollamaModels = (data.models ?? []).map((model: { name: string }) => model.name);
+    ollamaModels.forEach((model: string) => {
+      modelOptions.push({
+        id: model,
+        label: `${model} (local)`,
+        provider: 'ollama',
+      });
+    });
+
     response.json({
-      ok: true,
-      models: [...openRouterFreeModels, ...(data.models ?? []).map((model: { name: string }) => model.name)],
+      ok: modelOptions.length > 0,
+      models: modelOptions.map((model) => model.id),
+      modelOptions,
+      providers: providerStatus,
       openRouterConfigured: Boolean(openRouterApiKey),
     });
   } catch (error) {
+    providerStatus.ollama.error = error instanceof Error ? error.message : 'Could not reach Ollama.';
     response.json({
-      ok: false,
-      models: [...openRouterFreeModels, ...defaultOllamaModels],
+      ok: modelOptions.length > 0,
+      models: modelOptions.map((model) => model.id),
+      modelOptions,
+      providers: providerStatus,
       openRouterConfigured: Boolean(openRouterApiKey),
-      error: error instanceof Error ? error.message : 'Could not reach Ollama.',
+      error: providerStatus.ollama.error,
     });
   }
 });
