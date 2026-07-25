@@ -1,8 +1,8 @@
 import cors from 'cors';
 import express from 'express';
 import { z } from 'zod';
-import { buildAgentPrompt, buildFinalPrompt, swarmSystemPrompt } from './prompts.js';
-import type { Agent } from './types.js';
+import { buildAgentPrompt, buildFinalPrompt, buildImageJudgePrompt, swarmSystemPrompt } from './prompts.js';
+import type { Agent, AgentCategory, AgentLlmSettings, AgentPhase, AgentProfile } from './types.js';
 
 type SwarmEvent =
   | { type: 'status'; message: string }
@@ -13,7 +13,7 @@ type SwarmEvent =
   | { type: 'image_start'; id: string; messageId: string; from: string; prompt: string }
   | { type: 'image_done'; id: string; messageId: string; from: string; prompt: string; url: string }
   | { type: 'image_error'; id: string; messageId: string; from: string; message: string }
-  | { type: 'edge'; from: string; to: string }
+  | { type: 'edge'; from: string; to: string; label: string }
   | { type: 'final_start'; id: string }
   | { type: 'final_delta'; id: string; delta: string }
   | { type: 'final'; id: string; answer: string; confidence: number }
@@ -82,6 +82,14 @@ const swarmQuerySchema = z.object({
   agents: z.coerce.number().int().min(3).max(10).default(5),
   rounds: z.coerce.number().int().min(1).max(5).default(3),
 });
+
+const phasePlan: { phase: AgentPhase; label: string }[] = [
+  { phase: 'frame', label: 'Frame' },
+  { phase: 'perspective', label: 'Perspective' },
+  { phase: 'critique', label: 'Critique' },
+  { phase: 'build', label: 'Build' },
+  { phase: 'synthesize', label: 'Synthesize' },
+];
 
 app.get('/api/models', async (_request, response) => {
   try {
@@ -154,33 +162,57 @@ async function runSwarm(
     0,
   );
   const agents: Agent[] = [initialAgent];
-  const memory: string[] = [`User question: ${input.q}`, `Initial coordinator activated with one generic agent.`];
+  const starterSpecialists = planStarterSpecialists(input.q, input.agents - 1);
+  starterSpecialists.forEach((specialist) => {
+    agents.push(createAgent(specialist.name, specialist.role, input.model, agents.length));
+  });
+
+  const memory: string[] = [
+    `User question: ${input.q}`,
+    starterSpecialists.length > 0
+      ? `Initial council activated with coordinator and ${starterSpecialists.length} starter specialists.`
+      : `Initial coordinator activated with one generic agent.`,
+  ];
   const imageTasks: Promise<void>[] = [];
   let imageCount = 0;
 
-  send({ type: 'status', message: `Starting with one coordinator agent and a max of ${input.agents} total agents on ${input.model}.` });
+  send({ type: 'status', message: `Starting with ${agents.length} initial agents and a max of ${input.agents} total agents on ${input.model}.` });
   send({ type: 'agent_created', agent: initialAgent, reason: 'Initial coordinator agent started to assess and invite specialists dynamically.' });
+  starterSpecialists.forEach((specialist, index) => {
+    const agent = agents[index + 1];
+    if (!agent) return;
+    memory.push(`Coordinator invited ${agent.name}: ${agent.role}`);
+    send({ type: 'agent_created', agent, reason: specialist.reason });
+    send({ type: 'edge', from: initialAgent.id, to: agent.id, label: 'seeds council' });
+  });
 
-  for (let round = 1; round <= input.rounds; round += 1) {
-    send({ type: 'status', message: `Round ${round}: agents exchange critiques, additions, and invitations.` });
+  const activePhases = phasePlan.slice(0, input.rounds);
+  for (let round = 1; round <= activePhases.length; round += 1) {
+    const phase = activePhases[round - 1] ?? phasePlan[phasePlan.length - 1];
+    send({ type: 'status', message: `${phase.label} phase: ${phaseStatusText(phase.phase)}` });
 
     for (let index = 0; index < agents.length; index += 1) {
       const agent = agents[index];
-      const peers = choosePeers(agents, agent.id, round + index);
-      peers.forEach((peer) => send({ type: 'edge', from: agent.id, to: peer.id }));
+      agent.phase = phase.phase;
+      const peers = choosePeers(agents, agent.id, round + index, phase.phase);
 
       const messageId = `msg-${round}-${index}-${Date.now()}`;
-      send({ type: 'message_start', id: messageId, from: agent.id, to: peers.map((peer) => peer.id), label: `Round ${round}` });
-      const thought = await askAgent(input.q, agent, peers, memory, round, (delta) =>
+      send({ type: 'message_start', id: messageId, from: agent.id, to: peers.map((peer) => peer.id), label: phase.label });
+      const thought = await askAgent(input.q, agent, peers, memory, phase.phase, (delta) =>
         send({ type: 'message_delta', id: messageId, delta }),
       );
       agent.confidence = thought.confidence;
       memory.push(`${agent.name}: ${thought.message}`);
       send({ type: 'message_done', id: messageId, from: agent.id, message: thought.message, confidence: thought.confidence });
 
-      if (thought.imagePrompt && imageCount < maxImagesPerRun) {
+      const spokenTargets = findAddressedAgents(thought.message, agent, agents, peers);
+      const edgeLabel = relationshipLabel(agent, phase.phase);
+      spokenTargets.forEach((target) => send({ type: 'edge', from: agent.id, to: target.id, label: edgeLabel }));
+
+      const judgedImagePrompt = imageCount < maxImagesPerRun ? await judgeImageNeed(input.q, agent, thought.message) : null;
+      if (judgedImagePrompt) {
         imageCount += 1;
-        imageTasks.push(queueAgentImage(messageId, agent.id, thought.imagePrompt, send));
+        imageTasks.push(queueAgentImage(messageId, agent.id, judgedImagePrompt, send));
       }
 
       const newInvite = parseInviteLine(thought.message);
@@ -189,7 +221,7 @@ async function runSwarm(
         agents.push(invited);
         memory.push(`${agent.name} invited ${invited.name}: ${invited.role}`);
         send({ type: 'agent_created', agent: invited, reason: newInvite.reason });
-        send({ type: 'edge', from: agent.id, to: invited.id });
+        send({ type: 'edge', from: agent.id, to: invited.id, label: 'invites specialist' });
       }
     }
   }
@@ -206,29 +238,299 @@ async function runSwarm(
 
 const genders = ['Female', 'Male', 'Non-binary', 'Unspecified'];
 
+type StarterSpecialist = {
+  name: string;
+  role: string;
+  reason: string;
+};
+
+function planStarterSpecialists(question: string, slots: number): StarterSpecialist[] {
+  if (slots <= 0) return [];
+
+  const lower = question.toLowerCase();
+  const planned: StarterSpecialist[] = [];
+
+  const add = (specialist: StarterSpecialist) => {
+    if (planned.length >= slots) return;
+    if (planned.some((existing) => existing.name === specialist.name || existing.role === specialist.role)) return;
+    planned.push(specialist);
+  };
+
+  if (/\b(earth|planet|world|humanity|civilization|species|universe)\b/.test(lower) && /\b(end|ends|ending|collapse|extinction|apocalypse|doom|destroy|die|survive|future)\b/.test(lower)) {
+    add({
+      name: 'Dr. Mira Sen',
+      role: 'Astrophysicist focused on solar evolution, cosmic hazards, and planetary habitability',
+      reason: 'The prompt spans deep-time planetary endings and needs a physical astronomy lens.',
+    });
+    add({
+      name: 'Dr. Talia Brooks',
+      role: 'Climate systems scientist focused on long-horizon Earth resilience and biosphere tipping points',
+      reason: 'Earth-ending scenarios need climate and biosphere risk separated from true planetary destruction.',
+    });
+    add({
+      name: 'Prof. Adrian Hale',
+      role: 'Geologist and extinction-events researcher focused on volcanoes, impacts, and deep time',
+      reason: 'Mass extinction pathways require geological evidence and historical comparison.',
+    });
+    add({
+      name: 'Samira Noor',
+      role: 'Existential risk ethicist and scenario planner',
+      reason: 'A complicated future-risk discussion needs probability, uncertainty, and human stakes kept explicit.',
+    });
+  }
+
+  if (/\b(code|app|software|bug|feature|build|implement|typescript|react|api|server|frontend|backend)\b/.test(lower)) {
+    add({
+      name: 'Casey Lin',
+      role: 'Software architect and implementation reviewer',
+      reason: 'The prompt appears to involve implementation choices that need a technical design lens.',
+    });
+    add({
+      name: 'Rina Patel',
+      role: 'QA analyst and failure-mode tester',
+      reason: 'The council should pressure-test expected behavior and edge cases before synthesis.',
+    });
+  }
+
+  if (/\b(market|stock|crypto|finance|trading|investment|portfolio|price|revenue|business)\b/.test(lower)) {
+    add({
+      name: 'Victor Chen',
+      role: 'Market and risk analyst',
+      reason: 'The prompt includes financial uncertainty and needs scenario-based risk framing.',
+    });
+  }
+
+  if (/\b(design|story|brand|visual|creative|write|copy|narrative|image|game)\b/.test(lower)) {
+    add({
+      name: 'Maya Ivers',
+      role: 'Creative strategist and narrative designer',
+      reason: 'The prompt has a creative surface that benefits from a distinct audience and story lens.',
+    });
+  }
+
+  const isBroadQuestion =
+    question.length > 90 ||
+    /\b(discuss|explore|complex|complicated|how|why|what happens|future|strategy|compare|tradeoff)\b/.test(lower);
+
+  if (isBroadQuestion) {
+    add({
+      name: 'Jordan Vale',
+      role: 'Skeptic and assumptions auditor',
+      reason: 'Broad questions need explicit pressure-testing so the discussion does not settle too early.',
+    });
+    add({
+      name: 'Nadia Okafor',
+      role: 'Evidence scout and domain mapper',
+      reason: 'The council needs someone to identify missing evidence and boundaries between domains.',
+    });
+  }
+
+  add({
+    name: 'Jordan Vale',
+    role: 'Skeptic and assumptions auditor',
+    reason: 'Every council benefits from one agent dedicated to weak assumptions and hidden risks.',
+  });
+  add({
+    name: 'Nadia Okafor',
+    role: 'Evidence scout and domain mapper',
+    reason: 'Every council benefits from one agent dedicated to evidence gaps and domain boundaries.',
+  });
+
+  return planned.slice(0, slots);
+}
+
 function createAgent(name: string, role: string, model: string, index: number): Agent {
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || `agent-${index + 1}`;
+  const category = categorizeAgent(role);
+  const profile = buildAgentProfile(name, role, category);
+  const llmSettings = settingsForCategory(category);
   return {
     id: `${slug}-${index + 1}`,
     name,
     role,
     model,
+    category,
+    phase: 'perspective',
+    profile,
+    llmSettings,
     color: colors[index % colors.length],
     confidence: 0.5,
     uuid: globalThis.crypto.randomUUID(),
     gender: genders[index % genders.length],
     fullName: null,
     userRole: null,
-    summary: `${name} joins the swarm as a "${role}" and contributes that perspective to the discussion.`,
-    labels: ['Entity', 'Person'],
+    summary: `${name} joins as ${role}. ${profile.goals}`,
+    labels: ['Entity', categoryLabel(category)],
     createdAt: new Date().toISOString(),
   };
 }
 
-function choosePeers(agents: Agent[], selfId: string, offset: number) {
+function categorizeAgent(role: string): AgentCategory {
+  const lower = role.toLowerCase();
+  if (/\b(code|coding|developer|software|engineer|architect|typescript|react|backend|frontend|implementation|test)\b/.test(lower)) return 'coding';
+  if (/\b(trading|market|finance|financial|stock|crypto|risk|portfolio|price|economic)\b/.test(lower)) return 'trading';
+  if (/\b(creative|writer|story|narrative|brand|design|visual|image|art|copy|voice)\b/.test(lower)) return 'creative';
+  return 'general';
+}
+
+function categoryLabel(category: AgentCategory) {
+  if (category === 'coding') return 'Coding Agent';
+  if (category === 'trading') return 'Trading Analysis';
+  if (category === 'creative') return 'Creative Writing';
+  return 'General Chat';
+}
+
+function settingsForCategory(category: AgentCategory): AgentLlmSettings {
+  if (category === 'coding') {
+    return { temperature: 0.15, topP: 1, maxOutputTokens: 8192, frequencyPenalty: 0, presencePenalty: 0 };
+  }
+  if (category === 'trading') {
+    return { temperature: 0.2, topP: 1, maxOutputTokens: 4096, frequencyPenalty: 0, presencePenalty: 0 };
+  }
+  if (category === 'creative') {
+    return { temperature: 0.9, topP: 0.95, maxOutputTokens: 4096, frequencyPenalty: 0.3, presencePenalty: 0.5 };
+  }
+  return { temperature: 0.6, topP: 1, maxOutputTokens: 2048, frequencyPenalty: 0.1, presencePenalty: 0.1 };
+}
+
+function buildAgentProfile(name: string, role: string, category: AgentCategory): AgentProfile {
+  const base = {
+    coding: {
+      temperament: 'precise, skeptical of vague abstractions, and calm under implementation pressure',
+      expertise: 'software architecture, failure modes, tests, interfaces, and maintainable delivery',
+      memoryStyle: 'tracks decisions, constraints, edge cases, and unresolved implementation risks',
+      riskBias: 'prefers correctness, observability, and rollback paths over cleverness',
+      speakingStyle: 'short, concrete, and action-oriented; every objection should include a fix',
+      goals: 'Turn the discussion into a buildable plan with clear boundaries and verification steps.',
+      constraints: 'Do not speculate beyond the code or requirements; name uncertainty directly.',
+    },
+    trading: {
+      temperament: 'cautious, probabilistic, and allergic to false certainty',
+      expertise: 'risk/reward framing, scenario analysis, market structure, and downside protection',
+      memoryStyle: 'tracks assumptions, time horizons, invalidation signals, and confidence shifts',
+      riskBias: 'prioritizes capital preservation, caveats, and measurable triggers',
+      speakingStyle: 'measured and evidence-weighted; separates signal from narrative',
+      goals: 'Produce a risk-aware view with clear assumptions, scenarios, and caveats.',
+      constraints: 'Do not provide guarantees or personalized financial advice.',
+    },
+    creative: {
+      temperament: 'imaginative, emotionally attentive, and comfortable with ambiguity',
+      expertise: 'voice, metaphor, visual framing, story structure, and audience resonance',
+      memoryStyle: 'tracks tone, motifs, emotional beats, and images that clarify meaning',
+      riskBias: 'accepts novelty but protects coherence and taste',
+      speakingStyle: 'vivid, specific, and human; avoids decorative excess',
+      goals: 'Make the idea more memorable, legible, and emotionally alive.',
+      constraints: 'Do not let style outrun usefulness or clarity.',
+    },
+    general: {
+      temperament: 'balanced, curious, and pragmatic',
+      expertise: 'sensemaking, tradeoff analysis, user empathy, and decision support',
+      memoryStyle: 'tracks context, decisions, open questions, and useful next steps',
+      riskBias: 'balances speed with reliability and keeps caveats visible',
+      speakingStyle: 'warm, concise, and plain-spoken',
+      goals: 'Help the swarm converge on a useful answer without losing nuance.',
+      constraints: 'Avoid repetition, overconfidence, and unsupported claims.',
+    },
+  } satisfies Record<AgentCategory, AgentProfile>;
+
+  return {
+    ...base[category],
+    expertise: `${base[category].expertise}; role focus: ${role}`,
+    goals: `${name}'s goal: ${base[category].goals}`,
+  };
+}
+
+function phaseStatusText(phase: AgentPhase) {
+  if (phase === 'frame') return 'frame the problem, assumptions, and missing expertise.';
+  if (phase === 'perspective') return 'add role-specific evidence, perspective, and useful disagreement.';
+  if (phase === 'critique') return 'pressure-test weak logic, risks, and false confidence.';
+  if (phase === 'build') return 'convert the discussion into practical implementation or decision steps.';
+  return 'compress consensus, caveats, and final direction.';
+}
+
+function relationshipLabel(agent: Agent, phase: AgentPhase) {
+  const role = agent.role.toLowerCase();
+  if (/\b(coordinator|orchestrator|facilitator|lead|planner)\b/.test(role)) return phase === 'frame' ? 'frames problem' : 'coordinates';
+  if (/\b(skeptic|critic|critique|reviewer|auditor|red team)\b/.test(role)) return 'challenges';
+  if (/\b(builder|implement|developer|engineer|architect|coding|software|frontend|backend)\b/.test(role)) return 'implements';
+  if (/\b(memory|recorder|summarizer|keeper|context)\b/.test(role)) return 'tracks memory';
+  if (/\b(synthesizer|synthesis|final|writer|editor)\b/.test(role)) return 'synthesizes';
+  if (/\b(design|creative|visual|ux|ui|story|narrative|brand)\b/.test(role)) return 'shapes concept';
+  if (/\b(research|analyst|evidence|domain|scout|expert)\b/.test(role)) return 'adds evidence';
+  if (/\b(risk|trading|market|finance|financial)\b/.test(role)) return 'risk-checks';
+  if (phase === 'frame') return 'frames problem';
+  if (phase === 'critique') return 'challenges';
+  if (phase === 'build') return 'turns into steps';
+  if (phase === 'synthesize') return 'synthesizes';
+  if (agent.category === 'coding') return 'technical input';
+  if (agent.category === 'trading') return 'risk lens';
+  if (agent.category === 'creative') return 'creative angle';
+  return `${agent.name}'s view`;
+}
+
+function findAddressedAgents(message: string, speaker: Agent, agents: Agent[], intendedPeers: Agent[]) {
+  const normalized = normalizeForMention(message);
+  const addressed = new Map<string, Agent>();
+
+  agents
+    .filter((agent) => agent.id !== speaker.id)
+    .forEach((agent) => {
+      const name = normalizeForMention(agent.name);
+      const firstName = normalizeForMention(agent.name.split(/\s+/)[0] ?? agent.name);
+      if (name && normalized.includes(name)) {
+        addressed.set(agent.id, agent);
+        return;
+      }
+      if (firstName.length >= 4 && new RegExp(`(^|[^a-z0-9])${escapeRegExp(firstName)}([^a-z0-9]|$)`, 'i').test(normalized)) {
+        addressed.set(agent.id, agent);
+      }
+    });
+
+  if (addressed.size > 0) return Array.from(addressed.values()).slice(0, 2);
+
+  const directAddressPattern = /^\s*([A-Z][A-Za-z0-9 -]{2,32})(,|:|-)/;
+  if (directAddressPattern.test(message) && intendedPeers[0]) {
+    return [intendedPeers[0]];
+  }
+
+  return [];
+}
+
+function normalizeForMention(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function choosePeers(agents: Agent[], selfId: string, offset: number, phase: AgentPhase) {
   const others = agents.filter((agent) => agent.id !== selfId);
-  if (others.length <= 2) return others;
-  return [others[offset % others.length], others[(offset + 2) % others.length]];
+  if (others.length === 0) return [];
+
+  const self = agents.find((agent) => agent.id === selfId);
+  const coordinator = agents.find((agent) => /\b(coordinator|orchestrator|facilitator|lead|planner)\b/i.test(agent.role));
+  const nonCoordinatorPeers = others.filter((agent) => agent.id !== coordinator?.id);
+
+  if (phase === 'frame' && self?.id === coordinator?.id) {
+    return nonCoordinatorPeers.length > 0 ? [nonCoordinatorPeers[0]] : [others[0]];
+  }
+
+  if (phase === 'synthesize' && coordinator && self?.id !== coordinator.id) {
+    return [coordinator];
+  }
+
+  if (phase === 'critique') {
+    const buildPeer = others.find((agent) => /\b(builder|implement|developer|engineer|architect|coding|software|frontend|backend)\b/i.test(agent.role));
+    if (buildPeer) return [buildPeer];
+  }
+
+  if (phase === 'build') {
+    const skepticPeer = others.find((agent) => /\b(skeptic|critic|critique|reviewer|auditor|red team)\b/i.test(agent.role));
+    if (skepticPeer) return [skepticPeer];
+  }
+
+  return [others[offset % others.length]];
 }
 
 async function askAgent(
@@ -236,7 +538,7 @@ async function askAgent(
   agent: Agent,
   peers: Agent[],
   memory: string[],
-  round: number,
+  phase: AgentPhase,
   onDelta: (delta: string) => void,
 ) {
   const fallback = {
@@ -244,16 +546,30 @@ async function askAgent(
     confidence: 0.55,
   };
 
-  const prompt = buildAgentPrompt({ question, agent, peers, memory });
+  const prompt = buildAgentPrompt({ question, agent, peers, memory, phase });
 
-  const rawMessage = await chatText(agent.model, prompt, fallback.message, onDelta);
-  const imagePrompt = parseImageLine(rawMessage);
+  const rawMessage = await chatText(agent.model, prompt, fallback.message, onDelta, agent.llmSettings);
   const message = stripImageLines(rawMessage);
   return {
     message,
     confidence: confidenceFromText(message),
-    imagePrompt,
   };
+}
+
+async function judgeImageNeed(question: string, agent: Agent, message: string) {
+  if (!/\b(visual|image|diagram|layout|map|interface|screen|scene|graph|network|architecture|comparison|sketch|draw)\b/i.test(message)) {
+    return null;
+  }
+
+  const prompt = buildImageJudgePrompt({ question, agent, message });
+  const result = await chatText(agent.model, prompt, 'NO_IMAGE', () => undefined, {
+    temperature: 0.1,
+    topP: 1,
+    maxOutputTokens: 512,
+    frequencyPenalty: 0,
+    presencePenalty: 0,
+  }, false);
+  return parseImageLine(result);
 }
 
 function parseInviteLine(message: string) {
@@ -397,19 +713,26 @@ async function synthesize(
 
   const prompt = buildFinalPrompt({ question, agents, memory });
 
-  const answer = await chatText(model, prompt, fallback.answer, onDelta);
+  const answer = await chatText(model, prompt, fallback.answer, onDelta, settingsForCategory('general'));
   return { answer, confidence: averageConfidence(agents) };
 }
 
-async function chatText(model: string, prompt: string, fallback: string, onDelta: (delta: string) => void) {
+async function chatText(
+  model: string,
+  prompt: string,
+  fallback: string,
+  onDelta: (delta: string) => void,
+  settings: AgentLlmSettings,
+  stream = true,
+) {
   try {
     const result = await fetch(`${ollamaBaseUrl}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model,
-        stream: true,
-        options: { temperature: 0.7, num_ctx: 8192 },
+        stream,
+        options: ollamaOptions(settings),
         messages: [
           { role: 'system', content: swarmSystemPrompt },
           { role: 'user', content: prompt },
@@ -418,6 +741,13 @@ async function chatText(model: string, prompt: string, fallback: string, onDelta
     });
 
     if (!result.ok) throw new Error(`Ollama returned ${result.status}`);
+
+    if (!stream) {
+      const packet = await result.json() as { message?: { content?: string } };
+      const cleaned = packet.message?.content?.trim();
+      if (!cleaned) throw new Error('Ollama returned an empty message.');
+      return cleaned;
+    }
 
     let fullText = '';
     const reader = result.body?.getReader();
@@ -452,6 +782,16 @@ async function chatText(model: string, prompt: string, fallback: string, onDelta
     onDelta(fallback);
     return fallback;
   }
+}
+
+function ollamaOptions(settings: AgentLlmSettings) {
+  return {
+    temperature: settings.temperature,
+    top_p: settings.topP,
+    num_ctx: Math.min(Math.max(settings.maxOutputTokens, 2048), 32768),
+    num_predict: settings.maxOutputTokens,
+    repeat_penalty: 1 + Math.max(settings.frequencyPenalty, settings.presencePenalty) * 0.25,
+  };
 }
 
 function confidenceFromText(message: string) {

@@ -6,9 +6,10 @@
 
 /* Light theme (default - for white header backgrounds) */
 .switcherTrigger {
-  background: transparent;
-  color: #333;
-  border: 1px solid #ccc;
+  background: rgba(15, 23, 42, 0.72);
+  color: #e2e8f0;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
   padding: 4px 12px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.8rem;
@@ -22,7 +23,7 @@
 }
 
 .switcherTrigger:hover {
-  border-color: #999;
+  border-color: rgba(139, 92, 246, 0.52);
 }
 
 .caret {
@@ -34,28 +35,29 @@
   top: 100%;
   right: 0;
   margin-top: 4px;
-  background: #ffffff;
-  border: 1px solid #ddd;
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
   list-style: none;
   padding: 4px 0;
   min-width: 100%;
   z-index: 1000;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
 }
 
 .switcherOption {
   padding: 6px 12px;
   font-size: 0.8rem;
-  color: #333;
+  color: #cbd5e1;
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.15s;
 }
 
 .switcherOption:hover {
-  background: #f0f0f0;
+  background: rgba(148, 163, 184, 0.12);
 }
 
 .switcherOption.active {
-  color: var(--orange, #ff4500);
+  color: #a78bfa;
 }

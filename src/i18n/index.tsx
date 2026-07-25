@@ -3,7 +3,7 @@ import en from './locales/en.json';
 import zh from './locales/zh.json';
 import languages from './locales/languages.json';
 
-// Lightweight i18n to mirror MiroFish's vue-i18n usage. Locale JSON is shared
+// Lightweight i18n to mirror Councils's vue-i18n usage. Locale JSON is shared
 // verbatim with the original project so screen text stays identical.
 type Messages = Record<string, unknown>;
 

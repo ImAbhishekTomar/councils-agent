@@ -4,7 +4,7 @@ import HistoryDatabase from '../components/HistoryDatabase';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 import { useI18n } from '../i18n';
 import { setPendingUpload } from '../store/pendingUpload';
-import heroLogo from '../assets/logo/MiroFish_logo_left.jpeg';
+import heroLogo from '../assets/logo/councils-logo-full-dark.png';
 import './Home.css';
 
 const ACCEPTED = ['pdf', 'md', 'txt'];
@@ -64,15 +64,14 @@ function Home() {
   const startSimulation = () => {
     if (!canSubmit || loading) return;
     setPendingUpload(files, simulationRequirement);
-    // Run the existing Ollama swarm engine with the typed prompt. The MiroFish
-    // Process pipeline isn't ported yet, so route into the working playground.
+    // Route the prompt into the working Councils discussion playground.
     navigate('/playground');
   };
 
   return (
     <div className="home-container">
       <nav className="navbar">
-        <div className="nav-brand">MIROFISH</div>
+        <div className="nav-brand">Councils</div>
         <div className="nav-links">
           <LanguageSwitcher />
           <a href="https://github.com/666ghj/MiroFish" target="_blank" rel="noreferrer" className="github-link">
@@ -116,7 +115,7 @@ function Home() {
 
           <div className="hero-right">
             <div className="logo-container">
-              <img src={heroLogo} alt="MiroFish Logo" className="hero-logo" />
+              <img src={heroLogo} alt="Councils Agent Discussion logo" className="hero-logo" />
             </div>
             <button className="scroll-down-btn" onClick={scrollToBottom}>
               ↓

@@ -3,10 +3,10 @@ import { BrowserRouter, Link, Route, Routes, useParams } from 'react-router-dom'
 import { I18nProvider } from './i18n';
 import Home from './pages/Home';
 
-// Existing swarm playground - lazy so its dark-theme CSS only loads on that route.
+// Existing discussion playground - lazy so its route CSS only loads on demand.
 const SwarmPlayground = lazy(() => import('./App'));
 
-// Screens not yet ported from MiroFish. Placeholder keeps navigation working.
+// Screens not yet ported. Placeholder keeps navigation working.
 function ComingSoon({ label }: { label: string }) {
   const params = useParams();
   const id = Object.values(params)[0];
@@ -16,7 +16,7 @@ function ComingSoon({ label }: { label: string }) {
         <div style={{ fontSize: '0.8rem', color: '#FF4500', letterSpacing: 1 }}>◇ {label}</div>
         <h1 style={{ fontWeight: 500 }}>Screen not ported yet</h1>
         {id && <p style={{ color: '#666' }}>id: {id}</p>}
-        <Link to="/" style={{ color: '#FF4500' }}>← Back to Home</Link>
+        <Link to="/" style={{ color: '#8b5cf6' }}>← Back to Home</Link>
       </div>
     </div>
   );

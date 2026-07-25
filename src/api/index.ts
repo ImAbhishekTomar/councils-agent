@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-// Mirrors MiroFish's axios service. baseURL points at the existing Express
+// Mirrors Councils's axios service. baseURL points at the existing Express
 // backend; override with VITE_API_BASE_URL when the LangGraph backend lands.
 const baseURL = import.meta.env.VITE_API_BASE_URL ?? import.meta.env.VITE_API_BASE ?? 'http://localhost:8787';
 

@@ -1,6 +1,5 @@
-// Temporary hand-off store for the "start engine" action: Home stashes the
-// files + requirement here, then navigates to the Process page which performs
-// the actual API call. Mirrors the original MiroFish store/pendingUpload.js.
+// Temporary hand-off store for the "Start Council" action: Home stashes the
+// files + requirement here, then the playground route picks them up.
 
 type PendingUpload = {
   files: File[];

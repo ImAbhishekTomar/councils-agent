@@ -6,6 +6,24 @@ type Agent = {
   name: string;
   role: string;
   model: string;
+  category: 'coding' | 'trading' | 'creative' | 'general';
+  phase: 'frame' | 'perspective' | 'critique' | 'build' | 'synthesize';
+  profile: {
+    temperament: string;
+    expertise: string;
+    memoryStyle: string;
+    riskBias: string;
+    speakingStyle: string;
+    goals: string;
+    constraints: string;
+  };
+  llmSettings: {
+    temperature: number;
+    topP: number;
+    maxOutputTokens: number;
+    frequencyPenalty: number;
+    presencePenalty: number;
+  };
   color: string;
   confidence: number;
   uuid: string;
@@ -53,6 +71,7 @@ type AppEdge = {
   id: string;
   source: string;
   target: string;
+  label?: string;
   animated?: boolean;
   type?: string;
   style?: CSSProperties;
@@ -87,11 +106,11 @@ function renderNodeValue(value: string | null) {
 }
 
 function nodeRadius() {
-  return 10;
+  return 13;
 }
 
 function truncateNodeLabel(label: string) {
-  return label.length > 8 ? `${label.slice(0, 8)}...` : label;
+  return label.length > 18 ? `${label.slice(0, 18)}...` : label;
 }
 
 function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels, onToggleEdgeLabels }: GraphPanelProps) {
@@ -139,7 +158,7 @@ function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels
         id: edge.id,
         source: edge.source,
         target: edge.target,
-        name: 'speaks to',
+        name: edge.label ?? 'agent view',
         curvature,
         pairTotal: total,
         raw: { source: edge.source, target: edge.target },
@@ -292,7 +311,7 @@ function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels
         .attr('y', height / 2)
         .attr('text-anchor', 'middle')
         .attr('alignment-baseline', 'middle')
-        .text('Run the swarm to build the agent graph');
+        .text('Start a council to build the discussion graph');
       return;
     }
 
@@ -320,8 +339,8 @@ function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels
       .attr('class', (d) => `link-path${hasSelection && isEdgeHighlighted(d) ? ' is-highlighted' : ''}${hasSelection && !isEdgeHighlighted(d) ? ' is-dimmed' : ''}`)
       .attr('stroke-width', (d) => (hasSelection && isEdgeHighlighted(d) ? 2.5 : 1.5))
       .attr('fill', 'none')
-      .attr('stroke', (d) => (hasSelection && isEdgeHighlighted(d) ? '#E91E63' : '#C0C0C0'))
-      .attr('stroke-opacity', 1)
+      .attr('stroke', (d) => (hasSelection && isEdgeHighlighted(d) ? '#8B5CF6' : '#334155'))
+      .attr('stroke-opacity', (d) => (hasSelection && !isEdgeHighlighted(d) ? 0.32 : 0.92))
       .attr('stroke-linecap', 'round')
       .style('cursor', 'pointer')
       .on('click', (event) => {
@@ -395,8 +414,8 @@ function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels
       .attr('class', 'graph-node-dot')
       .attr('r', nodeRadius())
       .attr('fill', (d) => d.color)
-      .attr('stroke', '#ffffff')
-      .attr('stroke-width', (d) => (d.id === activeAgentId ? 4 : 2.5));
+      .attr('stroke', '#0f172a')
+      .attr('stroke-width', (d) => (d.id === activeAgentId ? 5 : 3));
 
     const nodeLabels = nodeGroup
       .selectAll<SVGTextElement, GraphNode>('text')
@@ -518,6 +537,22 @@ function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels
 
             <hr className="node-divider" />
 
+            <div className="node-section-title">Agent Profile:</div>
+            <dl className="node-field-grid">
+              <dt>Phase:</dt>
+              <dd>{selectedAgent.phase}</dd>
+              <dt>Category:</dt>
+              <dd>{selectedAgent.category}</dd>
+              <dt>Style:</dt>
+              <dd>{selectedAgent.profile.speakingStyle}</dd>
+              <dt>LLM:</dt>
+              <dd>
+                temp {selectedAgent.llmSettings.temperature}, top_p {selectedAgent.llmSettings.topP}, max {selectedAgent.llmSettings.maxOutputTokens}
+              </dd>
+            </dl>
+
+            <hr className="node-divider" />
+
             <div className="node-section-title">Summary:</div>
             <p className="node-summary">{selectedAgent.summary}</p>
 
@@ -534,7 +569,7 @@ function GraphPanel({ nodes, edges, activeAgentId, onSelectAgent, showEdgeLabels
       )}
       {entityTypes.length > 0 && (
         <div className="graph-legend">
-          <span className="legend-title">Agent types</span>
+          <span className="legend-title">Council roles</span>
           <div className="legend-items">
             {entityTypes.map((type) => (
               <div className="legend-item" key={type.name}>

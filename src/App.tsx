@@ -3,12 +3,31 @@ import { CircleStop, Database, GitBranch, MessageSquareText, Play, RadioTower, R
 import './App.css';
 import GraphPanel from './GraphPanel';
 import { clearPendingUpload, getPendingUpload } from './store/pendingUpload';
+import councilsIcon from './assets/logo/councils-icon-light.png';
 
 type Agent = {
   id: string;
   name: string;
   role: string;
   model: string;
+  category: 'coding' | 'trading' | 'creative' | 'general';
+  phase: 'frame' | 'perspective' | 'critique' | 'build' | 'synthesize';
+  profile: {
+    temperament: string;
+    expertise: string;
+    memoryStyle: string;
+    riskBias: string;
+    speakingStyle: string;
+    goals: string;
+    constraints: string;
+  };
+  llmSettings: {
+    temperature: number;
+    topP: number;
+    maxOutputTokens: number;
+    frequencyPenalty: number;
+    presencePenalty: number;
+  };
   color: string;
   confidence: number;
   uuid: string;
@@ -29,7 +48,7 @@ type SwarmEvent =
   | { type: 'image_start'; id: string; messageId: string; from: string; prompt: string }
   | { type: 'image_done'; id: string; messageId: string; from: string; prompt: string; url: string }
   | { type: 'image_error'; id: string; messageId: string; from: string; message: string }
-  | { type: 'edge'; from: string; to: string }
+  | { type: 'edge'; from: string; to: string; label: string }
   | { type: 'final_start'; id: string }
   | { type: 'final_delta'; id: string; delta: string }
   | { type: 'final'; id: string; answer: string; confidence: number }
@@ -66,11 +85,21 @@ type AppNode = {
   draggable?: boolean;
 };
 
+type AppEdge = {
+  id: string;
+  source: string;
+  target: string;
+  label: string;
+  animated?: boolean;
+  type?: string;
+  style?: React.CSSProperties;
+};
+
 type SidePanelTab = 'transcript' | 'plan' | 'system';
 
 const apiBase = import.meta.env.VITE_API_BASE ?? 'http://localhost:8787';
-const defaultQuestion =
-  'Build an agent playground where specialist agents debate the task, invite missing expertise, expose their graph memory, and return one useful decision.';
+const defaultQuestion = 'Should we launch now or phase the rollout?';
+const councilColors = ['#10b981', '#8b5cf6', '#06b6d4', '#0ea5e9', '#d946ad'];
 
 function App() {
   const [question, setQuestion] = useState(defaultQuestion);
@@ -79,7 +108,7 @@ function App() {
   const [agentTarget, setAgentTarget] = useState(5);
   const [rounds, setRounds] = useState(3);
   const [nodes, setNodes] = useState<AppNode[]>([]);
-  const [edges, setEdges] = useState<{ id: string; source: string; target: string; animated?: boolean; type?: string; style?: React.CSSProperties }[]>([]);
+  const [edges, setEdges] = useState<AppEdge[]>([]);
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [agents, setAgents] = useState<Record<string, Agent>>({});
   const [activeAgentId, setActiveAgentId] = useState<string>();
@@ -113,7 +142,7 @@ function App() {
         }
       })
       .catch(() => {
-        setStatus('Ollama model discovery failed. The playground can still show fallback swarm events.');
+        setStatus('Ollama model discovery failed. Councils can still show fallback discussion events.');
       });
   }, []);
 
@@ -256,14 +285,10 @@ function App() {
       }
 
       if (event.type === 'agent_created') {
-        const previousAgentIds = Object.keys(agentsRef.current);
-        const hubAgentId = previousAgentIds[0];
         // Prefer the (richer) join reason as the node summary when present.
-        const agent: Agent = { ...event.agent, summary: event.reason || event.agent.summary };
+        const nextColor = councilColors[Object.keys(agentsRef.current).length % councilColors.length];
+        const agent: Agent = { ...event.agent, color: nextColor, summary: event.reason || event.agent.summary };
         setAgents((current) => ({ ...current, [agent.id]: agent }));
-        if (hubAgentId && hubAgentId !== agent.id) {
-          setEdges((current) => upsertEdge(current, hubAgentId, agent.id));
-        }
         setNodes((current) => layoutMindMapNodes([
           ...current,
           {
@@ -283,13 +308,12 @@ function App() {
       }
 
       if (event.type === 'edge') {
-        setEdges((current) => upsertEdge(current, event.from, event.to));
+        setEdges((current) => upsertEdge(current, event.from, event.to, event.label));
         return;
       }
 
       if (event.type === 'message_start') {
         setActiveAgentId(event.from);
-        setEdges((current) => event.to.reduce((next, target) => upsertEdge(next, event.from, target), current));
         startStreamingMessage({
           id: event.id,
           agent: agentsRef.current[event.from],
@@ -382,24 +406,25 @@ function App() {
   const startRun = useCallback(() => {
     resetRun();
     setIsRunning(true);
-    setStatus('Connecting to swarm server');
+    setStatus('Opening council session');
+    const clampedAgentTarget = Math.min(10, Math.max(3, agentTarget));
     const params = new URLSearchParams({
       q: question,
       model,
-      agents: String(agentTarget),
+      agents: String(clampedAgentTarget),
       rounds: String(rounds),
     });
     const source = new EventSource(`${apiBase}/api/swarm/stream?${params.toString()}`);
     eventSourceRef.current = source;
     source.addEventListener('swarm', (message) => handleSwarmEvent(JSON.parse(message.data) as SwarmEvent));
     source.onerror = () => {
-      setStatus('Stream disconnected. Check that the server and Ollama are running.');
+      setStatus('Council stream disconnected. Check that the server and Ollama are running.');
       setIsRunning(false);
       source.close();
     };
   }, [agentTarget, handleSwarmEvent, model, question, resetRun, rounds]);
 
-  // If we arrived here from Home's "Start Engine", prefill the prompt and run.
+  // If we arrived here from Home's "Start Council", prefill the prompt and run.
   useEffect(() => {
     const pending = getPendingUpload();
     if (pending.isPending && pending.simulationRequirement.trim()) {
@@ -425,16 +450,19 @@ function App() {
     <main className="shell">
       <nav className="navbar">
         <div className="nav-brand-group">
-          <button className="brand" type="button" onClick={resetRun} title="Reset playground">
-            MIROFISH
+          <button className="brand" type="button" onClick={resetRun} title="Reset council">
+            <img src={councilsIcon} alt="" />
+            <span>
+              Councils
+              <small>Agent Discussion</small>
+            </span>
           </button>
-          <span>Agent God Discussion</span>
         </div>
 
         <div className="nav-controls">
           <label className="nav-prompt">
             <span>Simulation prompt</span>
-            <textarea value={question} onChange={(event) => setQuestion(event.target.value)} />
+            <textarea value={question} onChange={(event) => setQuestion(event.target.value)} wrap="off" />
           </label>
           <label>
             <span>Model</span>
@@ -447,9 +475,9 @@ function App() {
             </select>
           </label>
           <label>
-            <span>Max agents</span>
+            <span>Agents</span>
             <input
-              min="1"
+              min="3"
               max="10"
               type="number"
               value={agentTarget}
@@ -473,11 +501,11 @@ function App() {
             </button>
             {isRunning ? (
               <button className="primary-button stop" type="button" onClick={stopRun}>
-                <CircleStop size={18} /> Stop
+                <CircleStop size={18} /> Stop Council
               </button>
             ) : (
               <button className="primary-button" type="button" onClick={startRun}>
-                <Play size={18} /> Run swarm
+                <Play size={18} /> Start Council
               </button>
             )}
           </div>
@@ -489,7 +517,7 @@ function App() {
           <div className="graph-toolbar">
             <div>
               <strong>{status}</strong>
-              <span>{latestAgents.length} agents · {edges.length} channels · {avgConfidence}% average confidence</span>
+              <span>{latestAgents.length} voices · {edges.length} exchanges · {avgConfidence}% consensus signal</span>
             </div>
             <div className="graph-toolbar-tools">
               <RadioTower size={17} />
@@ -508,11 +536,11 @@ function App() {
       </section>
 
       <aside className="side-panel">
-        <div className="side-tabs" role="tablist" aria-label="Swarm side panel">
+        <div className="side-tabs" role="tablist" aria-label="Councils side panel">
           {[
-            ['transcript', MessageSquareText, 'Live Monologue'],
-            ['plan', GitBranch, 'Prototype Plan'],
-            ['system', Database, 'System Ready'],
+            ['transcript', MessageSquareText, 'Transcript'],
+            ['plan', GitBranch, 'Consensus'],
+            ['system', Database, 'System'],
           ].map(([id, Icon, label]) => (
             <button
               aria-controls={`side-tab-${id}`}
@@ -534,10 +562,10 @@ function App() {
             <section className="transcript-panel" id="side-tab-transcript" role="tabpanel">
               <div className="panel-title">
                 <MessageSquareText size={18} />
-                <h2>Live Monologue</h2>
+                <h2>Transcript</h2>
               </div>
               <div className="transcript" ref={transcriptRef}>
-                {transcript.length === 0 && <p className="empty">Run the swarm to watch agents join, argue, invite specialists, and settle.</p>}
+                {transcript.length === 0 && <p className="empty">Start a council to watch agents join, challenge assumptions, and converge.</p>}
                 {transcript.map((item) => (
                   <article className={`line ${item.kind}`} key={item.id}>
                     <div className="line-meta">
@@ -576,11 +604,10 @@ function App() {
             <section className="answer-panel" id="side-tab-plan" role="tabpanel">
               <div className="panel-title">
                 <GitBranch size={18} />
-                <h2>Prototype Plan</h2>
+                <h2>Consensus</h2>
               </div>
               <p>
-                Start small: event-streamed agents, visible memory, dynamic specialist invites, and measured consensus. Add LangGraph when
-                the orchestration rules harden, then PostgreSQL for durable runs and long-term memory.
+                The council records each argument, weighs specialist confidence, and turns the discussion into a concise recommendation.
               </p>
               {finalAnswer && <div className="final-answer">{finalAnswer}</div>}
             </section>
@@ -590,13 +617,13 @@ function App() {
             <section className="system-panel" id="side-tab-system" role="tabpanel">
               <div className="panel-title">
                 <Database size={18} />
-                <h2>System Ready</h2>
+                <h2>System</h2>
               </div>
-              <p>Upload the reality seed as a prompt, tune the run, then let the swarm build its discussion graph.</p>
+              <p>Upload context, tune the council size, then let the agents build a structured discussion graph.</p>
               <div className="metrics-row">
                 <div className="metric-card">
                   <strong>{latestAgents.length || '--'}</strong>
-                  <span>agent nodes</span>
+                  <span>council voices</span>
                 </div>
                 <div className="metric-card">
                   <strong>{edges.length || '--'}</strong>
@@ -605,8 +632,8 @@ function App() {
               </div>
               <div className="workflow-list">
                 {[
-                  ['01', 'Ontology generation', runPhase >= 0],
-                  ['02', 'Graph memory build', runPhase >= 1],
+                  ['01', 'Council opens', runPhase >= 0],
+                  ['02', 'Arguments connect', runPhase >= 1],
                   ['03', 'Consensus answer', runPhase >= 2],
                 ].map(([step, label, done]) => (
                   <div className={`workflow-item ${done ? 'complete' : ''}`} key={step as string}>
@@ -687,10 +714,14 @@ function relaxNodePositions(nodes: AppNode[], passes = 1) {
   return next;
 }
 
-function upsertEdge(edges: { id: string; source: string; target: string; animated?: boolean; type?: string; style?: React.CSSProperties }[], from: string, to: string) {
+function upsertEdge(edges: AppEdge[], from: string, to: string, label: string) {
   const id = `${from}-${to}`;
   if (edges.some((edge) => edge.id === id)) {
-    return edges.map((edge) => (edge.id === id ? { ...edge, animated: true } : edge));
+    return edges.map((edge) => {
+      if (edge.id !== id) return edge;
+      const nextLabel = isGenericEdgeLabel(label) && !isGenericEdgeLabel(edge.label) ? edge.label : label;
+      return { ...edge, label: nextLabel, animated: true };
+    });
   }
   return [
     ...edges,
@@ -698,6 +729,7 @@ function upsertEdge(edges: { id: string; source: string; target: string; animate
       id,
       source: from,
       target: to,
+      label,
       animated: true,
       type: 'default',
       style: {
@@ -706,6 +738,10 @@ function upsertEdge(edges: { id: string; source: string; target: string; animate
       },
     },
   ];
+}
+
+function isGenericEdgeLabel(label: string) {
+  return ['adds context', 'agent view'].includes(label) || label.endsWith("'s view");
 }
 
 export default App;

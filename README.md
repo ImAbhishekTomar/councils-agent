@@ -1,6 +1,6 @@
-# Agent God Discussion
+# Councils: Agent Discussion
 
-A local-first swarm-agent playground for exploring how multiple Ollama-backed agents can debate a question, invite new specialist agents, show their communication graph, and synthesize a final answer.
+A local-first agent discussion workspace for exploring how multiple Ollama-backed specialists can debate a question, invite missing expertise, show their communication graph, and synthesize a final answer.
 
 ## Run It
 
@@ -21,11 +21,11 @@ OLLAMA_URL=http://127.0.0.1:11434 npm run dev
 
 - React single-page playground with question, model, agent count, and round controls.
 - Live mind-map using `@xyflow/react`, with draggable circular agents and basic overlap relaxation.
-- Server-sent events from a small Node/Express swarm orchestrator.
+- Server-sent events from a small Node/Express discussion orchestrator.
 - Local Ollama model discovery.
 - Agent roles: Cartographer, Skeptic, Builder, Memory Keeper, Synthesizer.
 - Dynamic specialist creation when an agent invites a missing role.
-- Chat-style live monologue transcript with token streaming from each speaking agent.
+- Chat-style transcript with token streaming from each speaking agent.
 - Graceful fallback messages if Ollama returns non-JSON or is unavailable.
 
 ## Recommended Architecture Path
@@ -47,7 +47,7 @@ OLLAMA_URL=http://127.0.0.1:11434 npm run dev
 
 ## Advice
 
-This is useful as a thinking instrument, research assistant, design critic, decision board, or creative ideation engine. The benefit is not that “many agents” automatically means a better answer. The benefit comes from role diversity, visible disagreement, memory, and forcing the system to explain why a new specialist is needed.
+This is useful as a thinking instrument, research assistant, design critic, decision board, or creative ideation workspace. The benefit is not that “many agents” automatically means a better answer. The benefit comes from role diversity, visible disagreement, memory, and forcing the system to explain why a new specialist is needed.
 
 Similar ideas exist: AutoGen-style multi-agent chat, CrewAI role teams, LangGraph agent graphs, ChatDev-style software teams, and debate/committee prompting. The UI-first version here is still valuable because most agent systems hide the reasoning topology. Seeing who influenced whom can make the system easier to debug and more fun to reason with.
 
