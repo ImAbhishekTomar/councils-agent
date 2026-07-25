@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@firecms/neat':
+        specifier: ^1.0.2
+        version: 1.0.2
       '@huggingface/inference':
         specifier: ^4.13.23
         version: 4.13.23
@@ -254,6 +257,9 @@ packages:
     engines: {node: '>=18'}
     cpu: [x64]
     os: [win32]
+
+  '@firecms/neat@1.0.2':
+    resolution: {integrity: sha512-hP9Qqz3mPEgwMKOZygjkFMqDyKjrQwuSYt352+QJfg1SfAlGOfHzpQSeIAgeeLmdtSjE45zekBpnJPgtRhxclA==}
 
   '@huggingface/inference@4.13.23':
     resolution: {integrity: sha512-sUi2+AZP0Gda1zBXDl3HZo3O/qJnhUks53e7DKD4s+igo3ccbbULWvCZrU99M/nqDMSWCcZQxJCX8mH+OHNy2g==}
@@ -1696,6 +1702,8 @@ snapshots:
 
   '@esbuild/win32-x64@0.28.1':
     optional: true
+
+  '@firecms/neat@1.0.2': {}
 
   '@huggingface/inference@4.13.23':
     dependencies:
