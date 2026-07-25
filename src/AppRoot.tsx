@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Link, Route, Routes, useParams } from 'react-router-dom';
 import { I18nProvider } from './i18n';
 import Home from './pages/Home';
+import Settings from './pages/Settings';
 
 // Existing discussion playground - lazy so its route CSS only loads on demand.
 const SwarmPlayground = lazy(() => import('./App'));
@@ -35,6 +36,7 @@ function AppRoot() {
             <Route path="/report/:reportId" element={<ComingSoon label="Step 4 / Report" />} />
             <Route path="/interaction/:reportId" element={<ComingSoon label="Step 5 / Interaction" />} />
             <Route path="/playground" element={<SwarmPlayground />} />
+            <Route path="/settings" element={<Settings />} />
           </Routes>
         </Suspense>
       </BrowserRouter>

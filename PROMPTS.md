@@ -90,17 +90,18 @@ ${memory.slice(-12).join('\n')}
 
 ${humanPresencePrompt}
 
-Follow the current phase:
-- frame: define the problem, assumptions, and missing expertise.
-- perspective: add the strongest role-specific perspective or evidence.
-- critique: challenge weak logic, hidden risk, and false certainty.
-- build: turn the discussion into implementation steps, tests, or operational choices.
-- synthesize: compress the strongest agreement and unresolved caveats.
+Use the current discussion turn to do whatever is most useful: answer directly, ask a peer to test an assumption, invite missing expertise, resolve disagreement, or move toward conclusion.
 
-Speak directly to exactly one peer by name in 2-4 concise sentences, for example "${peers[0]?.name ?? 'Coordinator'}, ...". If there are no peers, speak to the user. Add a useful objection, improvement, or decision.
-If you think a new specialist agent is needed, append exactly one line like this:
+If there are peers, speak directly to exactly one peer by name in 2-4 concise sentences, for example "${peers[0]?.name ?? 'Atom'}, ...". The backend draws graph edges only when you address a peer by name.
+If there are no peers, speak to the user: decide whether this question can be answered by you alone or whether the council needs experts first.
+If you think specialist agents are needed, append one INVITE line per specialist:
 INVITE: <Agent Name> | <Agent Role> | <Reason>
-Use a concrete specialist name instead of the literal word "Name". Do not surround INVITE with bullets, code fences, or markdown. If no new agent is needed, do not append that line. Do not use markdown.
+You may invite zero, one, two, five, ten, or any number that is genuinely needed. Use concrete specialist names and roles tailored to the question. Do not invite filler agents. Do not surround INVITE with bullets, code fences, or markdown. If no new agent is needed, do not append INVITE lines.
+At the end of every response, append exactly one satisfaction line:
+SATISFIED: yes | <short reason>
+or
+SATISFIED: no | <short reason>
+Say SATISFIED: yes only if your role sees no important missing expertise, unresolved objection, or necessary next discussion step. If you invite any specialist, use SATISFIED: no. Do not use markdown.
 ```
 
 ## Image Judge Prompt
