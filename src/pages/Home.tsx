@@ -1,8 +1,8 @@
 import { useNavigate } from 'react-router-dom';
+import councilIcon from '../assets/logo/councils-icon-light.png';
 import HistoryDatabase from '../components/HistoryDatabase';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 import { useI18n } from '../i18n';
-import councilIcon from '../assets/logo/councils-icon-light.png';
 import './Home.css';
 
 function Home() {
@@ -26,7 +26,7 @@ function Home() {
         </div>
         <div className="nav-links">
           <LanguageSwitcher />
-          <a href="https://github.com/666ghj/MiroFish" target="_blank" rel="noreferrer" className="github-link">
+          <a href="https://github.com/ImAbhishekTomar/councils-agent" target="_blank" rel="noreferrer" className="github-link">
             {t('nav.visitGithub')} <span className="arrow">↗</span>
           </a>
         </div>

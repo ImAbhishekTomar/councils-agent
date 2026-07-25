@@ -171,6 +171,8 @@ Please avoid committing secrets. Put keys in `.env` or `server/.env`; env files 
 
 Councils is inspired by [666ghj/MiroFish](https://github.com/666ghj/MiroFish), especially the idea of a simulation workspace with agent personas, graph-like structure, and report/interaction workflows.
 
+- Some of the thought is inspired by one of my friends, [Shivam Verma](https://github.com/Shivworld007).
+
 Research and conceptual references:
 
 - Sang Hun Kim, Jongmin Lee, Dongkyu Park, So Young Lee, and Yosep Chong, [“Modeling Layered Consciousness with Multi-Agent Large Language Models”](https://arxiv.org/abs/2510.17844), arXiv:2510.17844. This inspired the simulated inner-state layer used as an architectural device for continuity, uncertainty, motive, and self-critique. Councils does not claim that agents are literally conscious.
