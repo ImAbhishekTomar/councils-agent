@@ -18,15 +18,42 @@
 }
 
 .home-container {
+  position: relative;
+  isolation: isolate;
   min-height: 100vh;
   color: var(--ink);
-  background:
-    linear-gradient(90deg, rgba(148, 163, 184, 0.07) 1px, transparent 1px) 0 0 / 36px 36px,
-    linear-gradient(0deg, rgba(148, 163, 184, 0.07) 1px, transparent 1px) 0 0 / 36px 36px,
-    radial-gradient(circle at 78% 12%, rgba(49, 95, 156, 0.24), transparent 26%),
-    radial-gradient(circle at 12% 76%, rgba(22, 135, 106, 0.2), transparent 30%),
-    linear-gradient(180deg, #070a12 0%, #0f172a 54%, #05070d 100%);
+  background: #05070d;
   font-family: var(--font-sans);
+  overflow-x: hidden;
+}
+
+.home-container::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(248, 250, 252, 0.06) 1px, transparent 1px) 0 0 / 36px 36px,
+    linear-gradient(0deg, rgba(248, 250, 252, 0.05) 1px, transparent 1px) 0 0 / 36px 36px,
+    radial-gradient(circle at 70% 8%, rgba(245, 200, 75, 0.14), transparent 27%),
+    linear-gradient(180deg, rgba(5, 7, 13, 0.2) 0%, rgba(5, 7, 13, 0.78) 72%, rgba(5, 7, 13, 0.94) 100%);
+}
+
+.neat-background-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.72;
+}
+
+.home-container > .navbar,
+.home-container > .main-content {
+  position: relative;
+  z-index: 1;
 }
 
 .navbar {
@@ -174,7 +201,7 @@
 
 .main-title {
   font-size: clamp(4rem, 8.5vw, 8.8rem);
-  line-height: 0.88;
+  line-height: 0.98;
   font-weight: 900;
   margin: 0 0 30px;
   color: var(--ink);
@@ -196,7 +223,9 @@
   max-width: 100%;
   overflow: hidden;
   white-space: nowrap;
-  clip-path: inset(0 100% 0 0);
+  padding-bottom: 0.08em;
+  margin-bottom: -0.08em;
+  clip-path: inset(0 100% -0.1em 0);
 }
 
 .typing-line-one {
@@ -1135,7 +1164,7 @@ html[lang='en'] .workflow-list .step-desc {
   }
 
   .main-title {
-    font-size: clamp(3.3rem, 17vw, 5.5rem);
+    font-size: clamp(2.65rem, 15vw, 4.2rem);
   }
 
   .hero-desc {

@@ -1,4 +1,6 @@
+import { NeatGradient, type NeatConfig } from '@firecms/neat';
 import { BrainCircuit, Download, Globe2, Image, KeyRound, RadioTower } from 'lucide-react';
+import { useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import councilIcon from '../assets/logo/councils-icon-light.png';
 import HistoryDatabase from '../components/HistoryDatabase';
@@ -26,6 +28,7 @@ function Home() {
 
   return (
     <div className="home-container">
+      <NeatLandingBackground />
       <nav className="navbar">
         <div className="nav-brand" aria-label="Councils">
           <img src={councilIcon} alt="" className="nav-mark" />
@@ -183,6 +186,134 @@ function Home() {
       </div>
     </div>
   );
+}
+
+const neatBackgroundConfig: NeatConfig = {
+  colors: [
+    { color: '#e15f37', enabled: true },
+    { color: '#f5c84b', enabled: true },
+    { color: '#16876a', enabled: true },
+    { color: '#06b6d4', enabled: true },
+    { color: '#315f9c', enabled: true },
+    { color: '#6d5bd0', enabled: true },
+  ],
+  speed: 1.7,
+  horizontalPressure: 2,
+  verticalPressure: 4.2,
+  waveFrequencyX: 2,
+  waveFrequencyY: 2,
+  waveAmplitude: 4.2,
+  shadows: 13,
+  highlights: 5,
+  colorBrightness: 0.78,
+  colorSaturation: 6.5,
+  wireframe: true,
+  colorBlending: 7,
+  backgroundColor: '#05070d',
+  backgroundAlpha: 1,
+  grainScale: 0,
+  grainSparsity: 0,
+  grainIntensity: 0,
+  grainSpeed: 0,
+  resolution: 0.22,
+  yOffset: 0,
+  yOffsetWaveMultiplier: 1.3,
+  yOffsetColorMultiplier: 2.6,
+  yOffsetFlowMultiplier: 2.8,
+  flowDistortionA: 2.4,
+  flowDistortionB: 2.1,
+  flowScale: 1.35,
+  flowEase: 0.41,
+  flowEnabled: false,
+  enableProceduralTexture: false,
+  transparentTextureVoid: false,
+  textureVoidLikelihood: 0.06,
+  textureVoidWidthMin: 10,
+  textureVoidWidthMax: 500,
+  textureBandDensity: 0.8,
+  textureColorBlending: 0.06,
+  textureSeed: 333,
+  textureEase: 0.6,
+  proceduralBackgroundColor: '#f5c84b',
+  textureShapeTriangles: 20,
+  textureShapeCircles: 15,
+  textureShapeBars: 15,
+  textureShapeSquiggles: 10,
+  domainWarpEnabled: false,
+  domainWarpIntensity: 0,
+  domainWarpScale: 3,
+  vignetteIntensity: 0.28,
+  vignetteRadius: 0.82,
+  fresnelEnabled: false,
+  fresnelPower: 2,
+  fresnelIntensity: 0.5,
+  fresnelColor: '#ffffff',
+  iridescenceEnabled: false,
+  iridescenceIntensity: 0.5,
+  iridescenceSpeed: 1,
+  bloomIntensity: 0,
+  bloomThreshold: 0.7,
+  chromaticAberration: 0,
+  shapeType: 'plane',
+  shapeRotationX: 0,
+  shapeRotationY: 0,
+  shapeRotationZ: 0,
+  shapeAutoRotateSpeedX: 0,
+  shapeAutoRotateSpeedY: 0,
+  sphereRadius: 15,
+  torusRadius: 15,
+  torusTube: 5,
+  cylinderRadius: 10,
+  cylinderHeight: 40,
+  planeBend: 0,
+  planeTwist: 0,
+  silhouetteFade: 0.25,
+  cylinderFade: 0.08,
+  ribbonFade: 0.05,
+  flatShading: true,
+  cameraLock: true,
+  cameraX: 0,
+  cameraY: 0,
+  cameraZ: 0,
+  cameraRotationX: 0,
+  cameraRotationY: 0,
+  cameraRotationZ: 0,
+  cameraZoom: 1,
+};
+
+function NeatLandingBackground() {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const gradientRef = useRef<NeatGradient | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (reduceMotion.matches) return undefined;
+
+    gradientRef.current = new NeatGradient({
+      ref: canvas,
+      ...neatBackgroundConfig,
+    });
+
+    const syncScroll = () => {
+      if (gradientRef.current) {
+        gradientRef.current.yOffset = window.scrollY;
+      }
+    };
+
+    syncScroll();
+    window.addEventListener('scroll', syncScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener('scroll', syncScroll);
+      gradientRef.current?.destroy();
+      gradientRef.current = null;
+    };
+  }, []);
+
+  return <canvas aria-hidden="true" className="neat-background-canvas" ref={canvasRef} />;
 }
 
 export default Home;
