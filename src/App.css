@@ -52,7 +52,7 @@ p {
   overflow: hidden;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 430px;
-  grid-template-rows: 96px minmax(0, 1fr);
+  grid-template-rows: 104px minmax(0, 1fr);
   color: var(--c-text);
   background:
     linear-gradient(180deg, rgba(15, 23, 42, 0.58), transparent 34%),
@@ -61,15 +61,32 @@ p {
 
 .navbar {
   grid-column: 1 / -1;
-  min-height: 96px;
-  padding: 14px 20px;
+  min-height: 104px;
+  padding: 16px 20px;
   display: grid;
-  grid-template-columns: 252px minmax(0, 1fr) auto;
+  grid-template-columns: 252px minmax(0, 1fr) max-content;
   align-items: center;
   gap: 18px;
   border-bottom: 1px solid var(--c-border);
   background: rgba(5, 7, 13, 0.84);
   backdrop-filter: blur(20px);
+  z-index: 20;
+}
+
+.shell .navbar {
+  grid-column: 1 / -1;
+  min-height: 104px;
+  padding: 16px 20px;
+  display: grid;
+  grid-template-columns: 252px minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 18px;
+  border-bottom: 1px solid var(--c-border);
+  background: rgba(5, 7, 13, 0.84);
+  backdrop-filter: blur(20px);
+  position: relative;
+  top: auto;
+  color: var(--c-text);
   z-index: 20;
 }
 
@@ -128,7 +145,15 @@ p {
 
 .nav-controls {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(150px, 190px) 104px 96px;
+  grid-template-columns: minmax(300px, 1fr) minmax(220px, 280px) 104px 96px;
+  align-items: stretch;
+  gap: 12px;
+  min-width: 0;
+}
+
+.shell .nav-controls {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) minmax(220px, 280px) 104px 96px;
   align-items: end;
   gap: 12px;
   min-width: 0;
@@ -136,9 +161,20 @@ p {
 
 .nav-status {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: flex-end;
   gap: 10px;
+  min-width: 0;
+  min-height: 62px;
+}
+
+.shell .nav-status {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+  min-height: 62px;
 }
 
 .status-indicator {
@@ -262,6 +298,7 @@ label {
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+  justify-content: end;
 }
 
 label span {
@@ -290,9 +327,9 @@ input:focus {
 }
 
 textarea {
-  height: 44px;
-  min-height: 44px;
-  max-height: 44px;
+  height: 42px;
+  min-height: 42px;
+  max-height: 42px;
   padding: 10px 12px;
   resize: vertical;
   line-height: 1.25;
@@ -309,6 +346,10 @@ select,
 input {
   height: 42px;
   padding: 0 12px;
+}
+
+select {
+  text-overflow: ellipsis;
 }
 
 .graph-panel {
@@ -1118,17 +1159,20 @@ input {
     grid-template-rows: auto minmax(0, 1fr) 46vh;
   }
 
-  .navbar {
+  .shell .navbar {
     grid-template-columns: 1fr;
     align-items: stretch;
+    min-height: 0;
   }
 
-  .nav-controls {
-    grid-template-columns: minmax(0, 1fr) 150px 92px 86px;
+  .shell .nav-controls {
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 280px) 92px 86px;
   }
 
-  .nav-status {
+  .shell .nav-status {
+    align-items: center;
     justify-content: space-between;
+    min-height: 42px;
   }
 
   .workspace {
@@ -1144,7 +1188,7 @@ input {
 }
 
 @media (max-width: 840px) {
-  .navbar {
+  .shell .navbar {
     padding: 14px;
   }
 
@@ -1163,11 +1207,15 @@ input {
     width: 100%;
   }
 
-  .nav-controls {
-    grid-template-columns: 1fr 1fr;
+  .shell .nav-controls {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
   .nav-prompt {
+    grid-column: 1 / -1;
+  }
+
+  .nav-controls label:nth-child(2) {
     grid-column: 1 / -1;
   }
 
@@ -1200,5 +1248,28 @@ input {
 
   .node-details {
     top: 64px;
+  }
+}
+
+@media (max-width: 520px) {
+  .shell .nav-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .shell .nav-status {
+    align-items: stretch;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .status-indicator,
+  .run-controls,
+  .primary-button {
+    width: 100%;
+  }
+
+  .run-controls {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
   }
 }

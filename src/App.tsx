@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
 import { CircleStop, Database, GitBranch, MessageSquareText, Play, RadioTower, RotateCcw, Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import './App.css';
+import councilsIcon from './assets/logo/councils-icon-light.png';
 import GraphPanel from './GraphPanel';
 import { clearPendingUpload, getPendingUpload } from './store/pendingUpload';
-import councilsIcon from './assets/logo/councils-icon-light.png';
 
 type Agent = {
   id: string;
@@ -104,7 +104,7 @@ type ModelOption = {
 };
 
 const apiBase = import.meta.env.VITE_API_BASE ?? 'http://localhost:8787';
-const defaultQuestion = 'Should we launch now or phase the rollout?';
+const defaultQuestion = 'dose god is exists?';
 const councilColors = ['#10b981', '#8b5cf6', '#06b6d4', '#0ea5e9', '#d946ad'];
 
 function App() {

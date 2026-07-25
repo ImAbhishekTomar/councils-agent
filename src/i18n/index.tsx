@@ -1,13 +1,12 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import en from './locales/en.json';
-import zh from './locales/zh.json';
 import languages from './locales/languages.json';
 
 // Lightweight i18n to mirror Councils's vue-i18n usage. Locale JSON is shared
 // verbatim with the original project so screen text stays identical.
 type Messages = Record<string, unknown>;
 
-const messages: Record<string, Messages> = { en, zh };
+const messages: Record<string, Messages> = { en, hi: en };
 
 export const availableLocales = Object.entries(languages)
   .filter(([key]) => messages[key])
