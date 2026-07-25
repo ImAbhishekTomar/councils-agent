@@ -1,3 +1,4 @@
+import { BrainCircuit, Download, Globe2, Image, KeyRound, RadioTower } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import councilIcon from '../assets/logo/councils-icon-light.png';
 import HistoryDatabase from '../components/HistoryDatabase';
@@ -14,6 +15,15 @@ function Home() {
   };
 
   const workflowSteps = ['01', '02', '03', '04', '05'] as const;
+  const testFeatures = [
+    { key: 'tokens', icon: KeyRound },
+    { key: 'web', icon: Globe2 },
+    { key: 'visuals', icon: Image },
+    { key: 'streaming', icon: RadioTower },
+    { key: 'export', icon: Download },
+    { key: 'innerState', icon: BrainCircuit },
+  ] as const;
+
   return (
     <div className="home-container">
       <nav className="navbar">
@@ -142,6 +152,28 @@ function Home() {
                 ))}
               </div>
             </div>
+          </div>
+        </section>
+
+        <section className="test-feature-section animate-rise delay-three">
+          <div className="test-feature-header">
+            <span>{t('home.testFeatureKicker')}</span>
+            <h2>{t('home.testFeatureTitle')}</h2>
+            <p>{t('home.testFeatureDesc')}</p>
+          </div>
+
+          <div className="test-feature-grid">
+            {testFeatures.map(({ key, icon: Icon }) => (
+              <article className="test-feature-card" key={key}>
+                <span className={`test-feature-icon feature-${key}`}>
+                  <Icon size={19} />
+                </span>
+                <div>
+                  <h3>{t(`home.testFeature${key}Title`)}</h3>
+                  <p>{t(`home.testFeature${key}Desc`)}</p>
+                </div>
+              </article>
+            ))}
           </div>
         </section>
 

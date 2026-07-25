@@ -1,4 +1,4 @@
-import { CircleStop, Database, GitBranch, MessageSquareText, Play, RadioTower, RotateCcw, Settings, Sparkles } from 'lucide-react';
+import { CircleStop, Database, Download, GitBranch, MessageSquareText, Play, RadioTower, RotateCcw, Settings, Sparkles } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import './App.css';
@@ -318,7 +318,7 @@ function App() {
       avatarAbortControllerRef.current = new AbortController();
     }
 
-    const tokens = providerSettingsEnabled ? getProviderTokens() : { openRouterToken: '', huggingFaceToken: '' };
+    const tokens = providerSettingsEnabled ? getProviderTokens() : { openRouterToken: '', huggingFaceToken: '', tavilyToken: '', tavilyMcpUrl: '' };
     fetch(`${apiBase}/api/agents/avatar`, {
       method: 'POST',
       headers: {
@@ -509,7 +509,7 @@ function App() {
     const clampedAgentTarget = Math.max(0, agentTarget);
     const clampedRounds = Math.max(0, rounds);
     try {
-      const tokens = providerSettingsEnabled ? getProviderTokens() : { openRouterToken: '', huggingFaceToken: '' };
+      const tokens = providerSettingsEnabled ? getProviderTokens() : { openRouterToken: '', huggingFaceToken: '', tavilyToken: '', tavilyMcpUrl: '' };
       const sessionResponse = await fetch(`${apiBase}/api/swarm/sessions`, {
         method: 'POST',
         headers: {
@@ -517,6 +517,8 @@ function App() {
           'X-Councils-Client-Id': getClientId(),
           ...(tokens.openRouterToken ? { 'X-OpenRouter-Token': tokens.openRouterToken } : {}),
           ...(tokens.huggingFaceToken ? { 'X-HuggingFace-Token': tokens.huggingFaceToken } : {}),
+          ...(tokens.tavilyToken ? { 'X-Tavily-Token': tokens.tavilyToken } : {}),
+          ...(tokens.tavilyMcpUrl ? { 'X-Tavily-Mcp-Url': tokens.tavilyMcpUrl } : {}),
         },
         body: JSON.stringify({
           q: question,
@@ -565,6 +567,21 @@ function App() {
     ? Math.round((latestAgents.reduce((sum, agent) => sum + agent.confidence, 0) / latestAgents.length) * 100)
     : 0;
   const runPhase = finalAnswer ? 2 : latestAgents.length ? 1 : isRunning ? 0 : -1;
+  const downloadTranscript = useCallback(() => {
+    const timestamp = new Date().toISOString();
+    const markdown = buildTranscriptMarkdown({
+      agents: latestAgents,
+      edges,
+      finalAnswer,
+      model,
+      question,
+      status,
+      timestamp,
+      transcript,
+    });
+    const filename = `councils-transcript-${timestamp.replace(/[:.]/g, '-')}.md`;
+    downloadTextFile(filename, markdown, 'text/markdown;charset=utf-8');
+  }, [edges, finalAnswer, latestAgents, model, question, status, transcript]);
 
   return (
     <main className="shell">
@@ -687,8 +704,19 @@ function App() {
           {activeSideTab === 'transcript' && (
             <section className="transcript-panel" id="side-tab-transcript" role="tabpanel">
               <div className="panel-title">
-                <MessageSquareText size={18} />
-                <h2>Transcript</h2>
+                <span className="panel-title-label">
+                  <MessageSquareText size={18} />
+                  <h2>Transcript</h2>
+                </span>
+                <button
+                  className="panel-icon-button"
+                  disabled={transcript.length === 0}
+                  onClick={downloadTranscript}
+                  title="Download transcript as Markdown"
+                  type="button"
+                >
+                  <Download size={16} />
+                </button>
               </div>
               <div className="transcript" ref={transcriptRef}>
                 {transcript.length === 0 && <p className="empty">Start a council to watch agents join, challenge assumptions, and converge.</p>}
@@ -875,6 +903,111 @@ function upsertEdge(edges: AppEdge[], from: string, to: string, label: string) {
 
 function isGenericEdgeLabel(label: string) {
   return ['adds context', 'agent view'].includes(label) || label.endsWith("'s view");
+}
+
+function buildTranscriptMarkdown({
+  agents,
+  edges,
+  finalAnswer,
+  model,
+  question,
+  status,
+  timestamp,
+  transcript,
+}: {
+  agents: Agent[];
+  edges: AppEdge[];
+  finalAnswer: string;
+  model: string;
+  question: string;
+  status: string;
+  timestamp: string;
+  transcript: TranscriptItem[];
+}) {
+  const lines = [
+    '# Councils Transcript',
+    '',
+    `- Exported: ${timestamp}`,
+    `- Model: ${model || 'Not selected'}`,
+    `- Status: ${status}`,
+    `- Agents: ${agents.length}`,
+    `- Exchanges: ${edges.length}`,
+    '',
+    '## Prompt',
+    '',
+    question.trim() || 'No prompt recorded.',
+    '',
+  ];
+
+  if (agents.length > 0) {
+    lines.push('## Agents', '');
+    agents.forEach((agent) => {
+      lines.push(`- ${escapeMarkdownInline(agent.name)}: ${escapeMarkdownInline(agent.role)} (${Math.round(agent.confidence * 100)}% confidence)`);
+    });
+    lines.push('');
+  }
+
+  if (edges.length > 0) {
+    lines.push('## Exchanges', '');
+    edges.forEach((edge) => {
+      lines.push(`- ${escapeMarkdownInline(edge.source)} -> ${escapeMarkdownInline(edge.target)}: ${escapeMarkdownInline(edge.label)}`);
+    });
+    lines.push('');
+  }
+
+  lines.push('## Transcript', '');
+  if (transcript.length === 0) {
+    lines.push('No transcript entries recorded.', '');
+  } else {
+    transcript.forEach((item, index) => {
+      const speaker = item.agent?.name ?? titleCase(item.kind);
+      const confidence = typeof item.confidence === 'number' ? ` - ${Math.round(item.confidence * 100)}% confidence` : '';
+      lines.push(`### ${index + 1}. ${speaker}${confidence}`, '');
+      lines.push(item.text.trim() || '_No text recorded._', '');
+
+      if (item.targets?.length) {
+        lines.push(`Targets: ${item.targets.join(', ')}`, '');
+      }
+
+      if (item.image) {
+        lines.push(`Image: ${item.image.status}`);
+        lines.push(`Prompt: ${item.image.prompt}`);
+        if (item.image.url && !item.image.url.startsWith('data:')) {
+          lines.push(`URL: ${item.image.url}`);
+        }
+        if (item.image.error) {
+          lines.push(`Error: ${item.image.error}`);
+        }
+        lines.push('');
+      }
+    });
+  }
+
+  if (finalAnswer.trim()) {
+    lines.push('## Final Answer', '', finalAnswer.trim(), '');
+  }
+
+  return `${lines.join('\n').replace(/\n{3,}/g, '\n\n')}\n`;
+}
+
+function downloadTextFile(filename: string, content: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function escapeMarkdownInline(value: string) {
+  return value.replace(/([\\`*_{}[\]()#+.!|>~-])/g, '\\$1');
+}
+
+function titleCase(value: string) {
+  return value.slice(0, 1).toUpperCase() + value.slice(1);
 }
 
 export default App;

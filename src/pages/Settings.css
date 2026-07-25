@@ -162,6 +162,15 @@
   color: #38bdf8;
 }
 
+.form-title.compact {
+  margin-top: 2px;
+}
+
+.settings-divider {
+  height: 1px;
+  background: rgba(148, 163, 184, 0.16);
+}
+
 .form-title h2,
 .guide-card h2 {
   margin: 0;

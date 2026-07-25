@@ -1,10 +1,14 @@
 const openRouterTokenKey = 'councils.openrouterToken';
 const huggingFaceTokenKey = 'councils.huggingFaceToken';
+const tavilyTokenKey = 'councils.tavilyToken';
+const tavilyMcpUrlKey = 'councils.tavilyMcpUrl';
 const clientIdKey = 'councils.clientId';
 
 export type ProviderTokens = {
   openRouterToken: string;
   huggingFaceToken: string;
+  tavilyToken: string;
+  tavilyMcpUrl: string;
 };
 
 export function settingsAvailableForThisBuild() {
@@ -15,12 +19,14 @@ export function settingsAvailableForThisBuild() {
 
 export function getProviderTokens(): ProviderTokens {
   if (typeof localStorage === 'undefined') {
-    return { openRouterToken: '', huggingFaceToken: '' };
+    return { openRouterToken: '', huggingFaceToken: '', tavilyToken: '', tavilyMcpUrl: '' };
   }
 
   return {
     openRouterToken: localStorage.getItem(openRouterTokenKey) ?? '',
     huggingFaceToken: localStorage.getItem(huggingFaceTokenKey) ?? '',
+    tavilyToken: localStorage.getItem(tavilyTokenKey) ?? '',
+    tavilyMcpUrl: localStorage.getItem(tavilyMcpUrlKey) ?? '',
   };
 }
 
@@ -28,12 +34,16 @@ export function saveProviderTokens(tokens: ProviderTokens) {
   if (typeof localStorage === 'undefined') return;
   writeToken(openRouterTokenKey, tokens.openRouterToken);
   writeToken(huggingFaceTokenKey, tokens.huggingFaceToken);
+  writeToken(tavilyTokenKey, tokens.tavilyToken);
+  writeToken(tavilyMcpUrlKey, tokens.tavilyMcpUrl);
 }
 
 export function clearProviderTokens() {
   if (typeof localStorage === 'undefined') return;
   localStorage.removeItem(openRouterTokenKey);
   localStorage.removeItem(huggingFaceTokenKey);
+  localStorage.removeItem(tavilyTokenKey);
+  localStorage.removeItem(tavilyMcpUrlKey);
 }
 
 export function getClientId() {

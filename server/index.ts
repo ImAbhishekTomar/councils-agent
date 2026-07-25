@@ -55,10 +55,16 @@ const openRouterApiKey = process.env.OPENROUTER_API_KEY?.trim();
 const openRouterSiteUrl = process.env.OPENROUTER_SITE_URL ?? 'http://localhost:5173';
 const openRouterAppName = process.env.OPENROUTER_APP_NAME ?? 'Councils Agent Discussion';
 const openRouterRequestDelayMs = Number(process.env.OPENROUTER_REQUEST_DELAY_MS ?? 1500);
+const tavilyApiKey = process.env.TAVILY_KEY?.trim() || process.env.TAVILY_API_KEY?.trim();
+const tavilyMcpUrl = process.env.TAVILY_MCP?.trim() || process.env.TAVILY_MCP_URL?.trim() || 'https://mcp.tavily.com/mcp/';
+const tavilySearchUrl = process.env.TAVILY_SEARCH_URL ?? 'https://api.tavily.com/search';
+const tavilyTimeoutMs = Number(process.env.TAVILY_TIMEOUT_MS ?? 20_000);
+const tavilyMaxSearchesPerRun = Number(process.env.TAVILY_MAX_SEARCHES_PER_RUN ?? 6);
+const tavilyMaxResults = Number(process.env.TAVILY_MAX_RESULTS ?? 4);
 const userSuppliedTokensEnabled =
   process.env.COUNCILS_ALLOW_USER_TOKENS === 'true' ||
   (process.env.NODE_ENV === 'production' && process.env.COUNCILS_ALLOW_USER_TOKENS !== 'false');
-const serverTokenRunLimit = Number(process.env.COUNCILS_SERVER_TOKEN_RUN_LIMIT ?? 4);
+const serverTokenRunLimit = Number(process.env.COUNCILS_SERVER_TOKEN_RUN_LIMIT ?? 2);
 const streamSessionTtlMs = Number(process.env.COUNCILS_STREAM_SESSION_TTL_MS ?? 120_000);
 let openRouterNextRequestAt = 0;
 const defaultOpenRouterFreeModels = [
@@ -197,6 +203,9 @@ type ProviderCredentials = {
   openRouterSource: TokenSource;
   huggingFaceToken?: string;
   huggingFaceSource: TokenSource;
+  tavilyApiKey?: string;
+  tavilySource: TokenSource;
+  tavilyMcpUrl?: string;
 };
 
 type SwarmSession = {
@@ -209,6 +218,7 @@ type SwarmGraphRuntime = {
   send: SendSwarmEvent;
   imageTasks: Promise<void>[];
   imageCount: number;
+  webSearchCount: number;
   credentials: ProviderCredentials;
 };
 
@@ -226,6 +236,8 @@ function resolveProviderCredentials(request: Request): ProviderCredentials {
   const clientId = normalizeClientId(headerValue(request, 'x-councils-client-id'));
   const userOpenRouterToken = userSuppliedTokensEnabled ? headerValue(request, 'x-openrouter-token')?.trim() : '';
   const userHuggingFaceToken = userSuppliedTokensEnabled ? headerValue(request, 'x-huggingface-token')?.trim() : '';
+  const userTavilyToken = userSuppliedTokensEnabled ? headerValue(request, 'x-tavily-token')?.trim() : '';
+  const userTavilyMcpUrl = userSuppliedTokensEnabled ? headerValue(request, 'x-tavily-mcp-url')?.trim() : '';
 
   return {
     clientId,
@@ -233,6 +245,9 @@ function resolveProviderCredentials(request: Request): ProviderCredentials {
     openRouterSource: userOpenRouterToken ? 'user' : openRouterApiKey ? 'server' : 'none',
     huggingFaceToken: userHuggingFaceToken || huggingFaceToken,
     huggingFaceSource: userHuggingFaceToken ? 'user' : huggingFaceToken ? 'server' : 'none',
+    tavilyApiKey: userTavilyToken || tavilyApiKey,
+    tavilySource: userTavilyToken ? 'user' : tavilyApiKey ? 'server' : 'none',
+    tavilyMcpUrl: userTavilyMcpUrl || tavilyMcpUrl,
   };
 }
 
@@ -284,6 +299,11 @@ app.get('/api/models', async (_request, response) => {
       available: Boolean(openRouterApiKey),
       error: openRouterApiKey ? null : 'OPENROUTER_API_KEY is not set.',
     },
+    tavily: {
+      available: Boolean(tavilyApiKey),
+      error: tavilyApiKey ? null : 'TAVILY_KEY is not set.',
+      mcpUrl: tavilyMcpUrl,
+    },
   };
   const modelOptions: { id: string; label: string; provider: 'ollama' | 'openrouter' }[] = [];
 
@@ -317,6 +337,9 @@ app.get('/api/models', async (_request, response) => {
       modelOptions,
       providers: providerStatus,
       openRouterConfigured: Boolean(openRouterApiKey),
+      tavilyConfigured: Boolean(tavilyApiKey),
+      tavilyMcpConfigured: Boolean(tavilyMcpUrl),
+      serverTokenRunLimit,
       userSuppliedTokensEnabled,
     });
   } catch (error) {
@@ -327,6 +350,9 @@ app.get('/api/models', async (_request, response) => {
       modelOptions,
       providers: providerStatus,
       openRouterConfigured: Boolean(openRouterApiKey),
+      tavilyConfigured: Boolean(tavilyApiKey),
+      tavilyMcpConfigured: Boolean(tavilyMcpUrl),
+      serverTokenRunLimit,
       userSuppliedTokensEnabled,
       error: providerStatus.ollama.error,
     });
@@ -469,6 +495,7 @@ async function runSwarm(
     send,
     imageTasks: [],
     imageCount: 0,
+    webSearchCount: 0,
     credentials,
   };
   const graph = buildSwarmGraph(runtime);
@@ -534,7 +561,11 @@ async function runDiscussionRoundNode(
 
     const messageId = `msg-${round}-${index}-${Date.now()}`;
     runtime.send({ type: 'message_start', id: messageId, from: agent.id, to: peers.map((peer) => peer.id), label });
-    const thought = await askAgent(state.input.q, agent, peers, memory, phase, runtime.credentials, (delta) =>
+    const webContext = await maybeBuildWebContext(state.input.q, agent, memory, runtime);
+    if (webContext) {
+      memory.push(`${agent.name} received Tavily web context:\n${webContext}`);
+    }
+    const thought = await askAgent(state.input.q, agent, peers, memory, phase, runtime.credentials, webContext, (delta) =>
       runtime.send({ type: 'message_delta', id: messageId, delta }),
     );
     agent.confidence = thought.confidence;
@@ -901,15 +932,19 @@ async function askAgent(
   memory: string[],
   phase: AgentPhase,
   credentials: ProviderCredentials,
+  webContext: string | null,
   onDelta: (delta: string) => void,
 ) {
   const fallback = {
-    message: `${agent.name} would examine "${question.slice(0, 90)}" from the angle of ${agent.role.toLowerCase()}`,
+    message: [
+      `${agent.name} could not get a usable model response for "${question.slice(0, 90)}" from the angle of ${agent.role.toLowerCase()}.`,
+      'SATISFIED: yes | Provider fallback used; stop retrying this same turn.',
+    ].join('\n'),
     confidence: 0.55,
   };
 
   agent.innerState = await updateInnerState(question, agent, peers, memory, phase, credentials);
-  const prompt = buildAgentPrompt({ question, agent, peers, memory, phase });
+  const prompt = buildAgentPrompt({ question, agent, peers, memory, phase, webContext });
 
   const rawMessage = await chatText(agent.model, prompt, fallback.message, onDelta, agent.llmSettings, credentials);
   const invites = parseInviteLines(rawMessage);
@@ -958,6 +993,127 @@ async function judgeImageNeed(question: string, agent: Agent, message: string, c
     presencePenalty: 0,
   }, credentials, false);
   return parseImageLine(result);
+}
+
+type TavilySearchResult = {
+  title?: string;
+  url?: string;
+  content?: string;
+  raw_content?: string | null;
+  score?: number;
+  published_date?: string;
+};
+
+type TavilySearchResponse = {
+  answer?: string;
+  query?: string;
+  results?: TavilySearchResult[];
+};
+
+async function maybeBuildWebContext(
+  question: string,
+  agent: Agent,
+  memory: string[],
+  runtime: SwarmGraphRuntime,
+) {
+  if (!runtime.credentials.tavilyApiKey || runtime.webSearchCount >= tavilyMaxSearchesPerRun) return null;
+  if (!shouldUseWebForAgent(question, agent, memory)) return null;
+
+  runtime.webSearchCount += 1;
+  const query = buildTavilyQuery(question, agent);
+  runtime.send({ type: 'status', message: `${agent.name} is checking Tavily for fresh web context.` });
+
+  try {
+    const context = await searchTavily(query, runtime.credentials);
+    if (!context) return null;
+    return context;
+  } catch (error) {
+    runtime.send({
+      type: 'status',
+      message: `Tavily web context was unavailable for ${agent.name}: ${error instanceof Error ? error.message : 'search failed'}`,
+    });
+    return null;
+  }
+}
+
+function shouldUseWebForAgent(question: string, agent: Agent, memory: string[]) {
+  const text = `${question} ${agent.role} ${agent.profile.expertise}`.toLowerCase();
+  const alreadyHasRecentWebContext = memory.slice(-8).some((entry) => entry.includes('Tavily web context:'));
+  const timelyOrSourceDependent =
+    /\b(today|now|current|currently|latest|recent|new|news|update|as of|this week|this month|this year|202[5-9]|price|prices|market|stock|crypto|earnings|weather|schedule|law|regulation|release|version|api|docs|benchmark|research|paper|citation|source|sources|verify|fact-check|compare vendors|competitor)\b/.test(text);
+  const agentNaturallyResearches =
+    /\b(research|analyst|evidence|market|finance|trading|legal|compliance|security|domain|investigator|scout|reviewer|auditor)\b/.test(text);
+
+  if (timelyOrSourceDependent) return true;
+  return agentNaturallyResearches && !alreadyHasRecentWebContext;
+}
+
+function buildTavilyQuery(question: string, agent: Agent) {
+  const compactQuestion = question.trim().replace(/\s+/g, ' ').slice(0, 420);
+  const roleHint = agent.role.trim().replace(/\s+/g, ' ').slice(0, 120);
+  return `${compactQuestion} ${roleHint}`.trim().slice(0, 520);
+}
+
+async function searchTavily(query: string, credentials: ProviderCredentials) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), tavilyTimeoutMs);
+
+  try {
+    const result = await fetch(tavilySearchUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${credentials.tavilyApiKey}`,
+        'X-Session-Id': credentials.clientId,
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        query,
+        search_depth: 'advanced',
+        chunks_per_source: 2,
+        max_results: tavilyMaxResults,
+        topic: 'general',
+        include_answer: true,
+        include_raw_content: true,
+        include_images: false,
+        include_image_descriptions: false,
+      }),
+    });
+
+    if (!result.ok) throw new Error(`Tavily returned ${result.status}: ${await summarizeResponseError(result)}`);
+    const data = await result.json() as TavilySearchResponse;
+    return formatTavilyContext(data);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function formatTavilyContext(data: TavilySearchResponse) {
+  const lines: string[] = [];
+  if (data.answer?.trim()) {
+    lines.push(`Tavily answer: ${data.answer.trim().replace(/\s+/g, ' ').slice(0, 900)}`);
+  }
+
+  (data.results ?? []).slice(0, tavilyMaxResults).forEach((item, index) => {
+    const title = normalizeTavilyText(item.title, `Source ${index + 1}`, 160);
+    const url = normalizeTavilyText(item.url, '', 260);
+    const published = normalizeTavilyText(item.published_date, '', 80);
+    const content = normalizeTavilyText(item.raw_content || item.content, '', 900);
+    if (!url && !content) return;
+    lines.push([
+      `${index + 1}. ${title}${published ? ` (${published})` : ''}`,
+      url ? `URL: ${url}` : '',
+      content ? `Relevant text: ${content}` : '',
+    ].filter(Boolean).join('\n'));
+  });
+
+  return lines.length > 0 ? lines.join('\n\n').slice(0, 5200) : null;
+}
+
+function normalizeTavilyText(value: unknown, fallback: string, maxLength: number) {
+  if (typeof value !== 'string') return fallback;
+  const cleaned = value.trim().replace(/\s+/g, ' ');
+  return cleaned ? cleaned.slice(0, maxLength) : fallback;
 }
 
 function parseInviteLines(message: string): StarterSpecialist[] {
@@ -1224,7 +1380,7 @@ async function synthesize(
   onDelta: (delta: string) => void,
 ) {
   const fallback = {
-    answer: `The atom-based council has produced a best-effort answer for "${question}" from the discussion available so far. If the initial atom or any invited expert identified missing expertise, treat the answer as provisional and continue the conversation until the active agents are satisfied.`,
+    answer: buildFinalFallbackAnswer(question, model),
     confidence: averageConfidence(agents),
   };
 
@@ -1232,6 +1388,22 @@ async function synthesize(
 
   const answer = await chatText(model, prompt, fallback.answer, onDelta, settingsForCategory('general'), credentials);
   return { answer, confidence: averageConfidence(agents) };
+}
+
+function buildFinalFallbackAnswer(question: string, model: string) {
+  if (/\bCOUNCILS_SERVER_TOKEN_RUN_LIMIT\b/i.test(question)) {
+    return [
+      `COUNCILS_SERVER_TOKEN_RUN_LIMIT controls how many OpenRouter runs a browser can use with the server-stored OpenRouter token before it must provide its own token.`,
+      `The current configured limit is ${serverTokenRunLimit}. Set COUNCILS_SERVER_TOKEN_RUN_LIMIT=2 in .env or server/.env to keep it at 2, or change the number and restart the dev server.`,
+      'This fallback appeared because the selected model did not return a usable final response. Check the server terminal for the provider error line.',
+    ].join('\n\n');
+  }
+
+  return [
+    `I could not get a usable final response from ${model}.`,
+    `The council reached fallback synthesis for: "${question}"`,
+    'Check the server terminal for the provider error. Common local causes are Ollama not running, the selected model not being pulled, an OpenRouter auth/rate-limit error, or the provider returning an empty streamed response.',
+  ].join('\n\n');
 }
 
 async function chatText(
@@ -1333,7 +1505,8 @@ async function chatTextOpenRouter(
     const cleaned = fullText.trim();
     if (!cleaned) throw new Error('OpenRouter returned an empty message.');
     return cleaned;
-  } catch {
+  } catch (error) {
+    console.warn(`OpenRouter chat fallback for ${model}: ${formatProviderError(error)}`);
     onDelta(fallback);
     return fallback;
   }
@@ -1423,10 +1596,17 @@ async function chatTextOllama(
     const cleaned = fullText.trim();
     if (!cleaned) throw new Error('Ollama returned an empty message.');
     return cleaned;
-  } catch {
+  } catch (error) {
+    console.warn(`Ollama chat fallback for ${model}: ${formatProviderError(error)}`);
     onDelta(fallback);
     return fallback;
   }
+}
+
+function formatProviderError(error: unknown) {
+  if (error instanceof DOMException && error.name === 'AbortError') return 'Request timed out or was aborted.';
+  if (error instanceof Error) return error.message;
+  return 'Unknown provider error.';
 }
 
 async function summarizeResponseError(result: Response) {

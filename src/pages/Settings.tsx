@@ -1,9 +1,12 @@
-import { ArrowLeft, CheckCircle2, Eye, EyeOff, KeyRound, Server, Trash2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Eye, EyeOff, Globe2, KeyRound, Server, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import councilIcon from '../assets/logo/councils-icon-light.png';
 import { clearProviderTokens, getProviderTokens, saveProviderTokens, settingsAvailableForThisBuild } from '../store/providerTokens';
 import './Settings.css';
+
+const apiBase = import.meta.env.VITE_API_BASE ?? 'http://localhost:8787';
+const defaultServerTokenRunLimit = 2;
 
 const openRouterSteps = [
   'Open openrouter.ai and sign in.',
@@ -21,10 +24,20 @@ const huggingFaceSteps = [
   'Keep repository write, billing administration, and organization management permissions off.',
 ];
 
+const tavilySteps = [
+  'Open tavily.com and sign in.',
+  'Create or copy a Tavily API key from the dashboard.',
+  'Use the hosted MCP URL if you want MCP-capable hosts to connect to Tavily too.',
+  'Councils will search only when a council question needs fresh or sourced web context.',
+];
+
 function Settings() {
   const enabled = settingsAvailableForThisBuild();
   const [openRouterToken, setOpenRouterToken] = useState('');
   const [huggingFaceToken, setHuggingFaceToken] = useState('');
+  const [tavilyToken, setTavilyToken] = useState('');
+  const [tavilyMcpUrl, setTavilyMcpUrl] = useState('');
+  const [serverTokenRunLimit, setServerTokenRunLimit] = useState(defaultServerTokenRunLimit);
   const [showTokens, setShowTokens] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -32,14 +45,31 @@ function Settings() {
     const tokens = getProviderTokens();
     setOpenRouterToken(tokens.openRouterToken);
     setHuggingFaceToken(tokens.huggingFaceToken);
+    setTavilyToken(tokens.tavilyToken);
+    setTavilyMcpUrl(tokens.tavilyMcpUrl);
+  }, []);
+
+  useEffect(() => {
+    fetch(`${apiBase}/api/models`)
+      .then((response) => response.json())
+      .then((data: { serverTokenRunLimit?: number }) => {
+        const limit = data.serverTokenRunLimit;
+        if (typeof limit === 'number' && Number.isFinite(limit) && limit >= 0) {
+          setServerTokenRunLimit(limit);
+        }
+      })
+      .catch(() => undefined);
   }, []);
 
   const tokenType = showTokens ? 'text' : 'password';
-  const hasTokens = useMemo(() => Boolean(openRouterToken.trim() || huggingFaceToken.trim()), [huggingFaceToken, openRouterToken]);
+  const hasTokens = useMemo(
+    () => Boolean(openRouterToken.trim() || huggingFaceToken.trim() || tavilyToken.trim() || tavilyMcpUrl.trim()),
+    [huggingFaceToken, openRouterToken, tavilyMcpUrl, tavilyToken],
+  );
 
   const handleSave = () => {
     if (!enabled) return;
-    saveProviderTokens({ openRouterToken, huggingFaceToken });
+    saveProviderTokens({ openRouterToken, huggingFaceToken, tavilyToken, tavilyMcpUrl });
     setSaved(true);
     window.setTimeout(() => setSaved(false), 2200);
   };
@@ -48,6 +78,8 @@ function Settings() {
     clearProviderTokens();
     setOpenRouterToken('');
     setHuggingFaceToken('');
+    setTavilyToken('');
+    setTavilyMcpUrl('');
     setSaved(false);
   };
 
@@ -71,10 +103,10 @@ function Settings() {
         <header className="settings-header">
           <div>
             <span className="settings-kicker">Keys stay in this browser</span>
-            <h1>Connect your own OpenRouter and Hugging Face tokens</h1>
+            <h1>Connect model, image, and web extraction providers</h1>
           </div>
           <p>
-            Deployed users can bring personal provider keys. If no OpenRouter token is saved, Councils uses the server token for up to 4 council runs from this browser.
+            Deployed users can bring personal provider keys. If no OpenRouter token is saved, Councils uses the server token for up to {serverTokenRunLimit} council runs from this browser.
           </p>
         </header>
 
@@ -116,6 +148,37 @@ function Settings() {
               />
             </label>
 
+            <div className="settings-divider" />
+
+            <div className="form-title compact">
+              <Globe2 size={18} />
+              <h2>Internet extraction</h2>
+            </div>
+
+            <label className="settings-field">
+              <span>Tavily API key</span>
+              <input
+                autoComplete="off"
+                disabled={!enabled}
+                onChange={(event) => setTavilyToken(event.target.value)}
+                placeholder="tvly-..."
+                type={tokenType}
+                value={tavilyToken}
+              />
+            </label>
+
+            <label className="settings-field">
+              <span>Tavily MCP URL</span>
+              <input
+                autoComplete="off"
+                disabled={!enabled}
+                onChange={(event) => setTavilyMcpUrl(event.target.value)}
+                placeholder="https://mcp.tavily.com/mcp/"
+                type={showTokens ? 'text' : 'password'}
+                value={tavilyMcpUrl}
+              />
+            </label>
+
             <div className="settings-actions">
               <button className="settings-primary" disabled={!enabled} onClick={handleSave} type="button">
                 <CheckCircle2 size={17} />
@@ -132,7 +195,7 @@ function Settings() {
             <div className="fallback-box">
               <strong>Server token fallback</strong>
               <p>
-                No personal OpenRouter key? The deployed app can use the server-stored key for 4 council runs. After that, save your own OpenRouter token here to continue.
+                No personal OpenRouter or Tavily key? The deployed app can use server-stored keys when configured. OpenRouter is limited to {serverTokenRunLimit} council runs from this browser.
               </p>
             </div>
           </form>
@@ -140,6 +203,7 @@ function Settings() {
           <div className="guide-column">
             <GuideCard title="Create an OpenRouter token" steps={openRouterSteps} />
             <GuideCard title="Create a Hugging Face token" steps={huggingFaceSteps} />
+            <GuideCard title="Connect Tavily web extraction" steps={tavilySteps} />
           </div>
         </section>
       </section>

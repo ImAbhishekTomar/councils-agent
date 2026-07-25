@@ -17,13 +17,31 @@ Councils is built around a simple idea: useful agent systems should make disagre
 The current prototype includes:
 
 - A dark animated landing page with Councils branding.
+- A landing-page test feature panel for the newest agent capabilities.
 - A React playground for live agent discussion.
 - Server-sent event streaming from a Node/Express + LangGraph orchestrator.
 - Local Ollama model discovery.
 - OpenRouter support for free models only.
+- Browser-saved provider settings for OpenRouter, Hugging Face, and Tavily.
+- Tavily-backed web extraction when agents need current sourced context.
 - Dynamic specialist creation through `INVITE:` lines.
 - A visible agent graph powered by `@xyflow/react`.
 - A reflective simulated inner-state pass for each agent before it speaks.
+- Optional generated agent avatars and message visuals.
+- Markdown transcript export for completed or in-progress council runs.
+- Home-screen run history preview from the simulation history endpoint.
+
+## Test The New Features
+
+From the landing page, the new test feature panel highlights the flows worth checking after changes:
+
+- Open **Settings** and save personal OpenRouter, Hugging Face, or Tavily credentials. In local development, server environment variables are used instead unless user tokens are enabled.
+- Start a council with an OpenRouter free model or a local Ollama model and confirm the transcript streams live.
+- Ask a time-sensitive or source-heavy question to exercise Tavily web extraction.
+- Ask for a visual comparison, layout, scene, or graph to test message image generation.
+- Confirm generated avatars appear when a Hugging Face token is available.
+- Use the transcript download button in the playground to export the run as Markdown.
+- Revisit the landing page to inspect the run history preview.
 
 ## Branding
 
@@ -110,6 +128,7 @@ OPENROUTER_FREE_MODELS=openrouter/free,inclusionai/ling-3.0-flash:free,poolside/
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_SITE_URL=http://localhost:5173
 OPENROUTER_APP_NAME="Councils Agent Discussion"
+COUNCILS_SERVER_TOKEN_RUN_LIMIT=2
 ```
 
 `openrouter/auto-beta` is intentionally excluded from the default list because it can route to paid models. The backend allows `openrouter/free` and model IDs ending in `:free`.

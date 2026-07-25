@@ -918,12 +918,50 @@ select {
 }
 
 .panel-title {
+  justify-content: space-between;
   gap: 10px;
   margin-bottom: 14px;
 }
 
+.panel-title-label {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .panel-title svg {
   color: var(--c-cyan);
+}
+
+.panel-icon-button {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--c-muted);
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.78);
+  transition:
+    color 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.panel-icon-button:hover:not(:disabled) {
+  color: var(--c-text);
+  border-color: var(--c-border-strong);
+  background: rgba(30, 41, 59, 0.86);
+  transform: translateY(-1px);
+}
+
+.panel-icon-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .system-panel > p,

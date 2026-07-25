@@ -72,12 +72,14 @@ export function buildAgentPrompt({
   peers,
   memory,
   phase,
+  webContext,
 }: {
   question: string;
   agent: Agent;
   peers: Agent[];
   memory: string[];
   phase: string;
+  webContext?: string | null;
 }) {
   return `You are ${agent.name}. Role: ${agent.role}
 Current discussion phase: ${phase}
@@ -96,6 +98,7 @@ Question: ${question}
 Known peers: ${peers.map((peer) => `${peer.name} (${peer.role})`).join('; ')}
 Shared short-term memory:
 ${memory.slice(-12).join('\n')}
+${webContext ? `\nFresh web context available to you:\n${webContext}\nUse this web context only where it directly supports the answer. Attribute facts to source titles or URLs when useful, and say when the web context is insufficient.` : ''}
 
 ${humanPresencePrompt}
 
