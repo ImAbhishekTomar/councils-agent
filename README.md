@@ -154,16 +154,78 @@ The current prototype is intentionally small:
 - `server/types.ts`: agent and profile types.
 - `PROMPTS.md`: prompt mirror for easier editing.
 
-LangGraph agent flow, simplified:
+## Agent Graph Workflow
 
-1. Create one initial atom.
-2. Let that atom decide whether it can answer alone or needs to invite experts.
-3. Create invited agents as standalone nodes without drawing edges.
-4. Stream each agent message to the UI.
-5. Draw graph edges only when one agent addresses another in conversation.
-6. Parse any number of specialist invites from any agent.
-7. Keep looping until agents report satisfaction or a nonzero round cap is reached.
-8. Synthesize the final answer in the terminal graph node.
+Councils has two connected graph layers:
+
+- The **LangGraph workflow** controls the run lifecycle on the server.
+- The **visible agent graph** is built from streamed events in the React UI. Agent nodes appear when the backend emits `agent_created`; edges appear only when one agent directly addresses another agent by name.
+
+```mermaid
+flowchart TD
+  User["User starts a council run"] --> Session["POST /api/swarm/sessions"]
+  Session --> Credentials["Resolve provider tokens and free-model limits"]
+  Credentials --> Stream["Open SSE stream: /api/swarm/stream/:streamId"]
+  Stream --> Runtime["Create run runtime: send events, image tasks, web-search count"]
+  Runtime --> Graph["Invoke LangGraph state graph"]
+
+  subgraph Server["Server LangGraph workflow"]
+    Start((START)) --> Init["initialize_council"]
+    Init --> Atom["Create Atom agent"]
+    Atom --> InitEvents["Emit status + agent_created"]
+    InitEvents --> Round["discussion_round"]
+
+    Round --> EachAgent{"For each current agent"}
+    EachAgent --> Inner["Update simulated inner state"]
+    Inner --> WebCheck{"Needs fresh sourced context?"}
+    WebCheck -- "Yes, Tavily token available" --> Tavily["Fetch Tavily web context"]
+    WebCheck -- "No" --> Prompt["Build agent prompt"]
+    Tavily --> Prompt
+    Prompt --> Provider{"Selected model provider"}
+    Provider -- "OpenRouter free model" --> OpenRouter["Stream chat from OpenRouter"]
+    Provider -- "Ollama/local model" --> Ollama["Stream chat from Ollama"]
+    OpenRouter --> Parse["Parse response"]
+    Ollama --> Parse
+
+    Parse --> Done["Emit message_done and save memory"]
+    Done --> Addressed{"Message names peer?"}
+    Addressed -- "Yes" --> Edge["Emit edge event"]
+    Addressed -- "No" --> ImageCheck
+    Edge --> ImageCheck{"Image would clarify message?"}
+    ImageCheck -- "Yes, under image cap" --> ImageTask["Queue image_start/image_done or image_error"]
+    ImageCheck -- "No" --> Invites
+    ImageTask --> Invites{"INVITE lines found?"}
+    Invites -- "Yes, under agent cap and not duplicate" --> NewAgent["Create specialist agent"]
+    NewAgent --> AgentEvent["Emit agent_created"]
+    AgentEvent --> EachAgent
+    Invites -- "No" --> EachAgent
+
+    EachAgent --> Route{"All satisfied or round cap reached?"}
+    Route -- "No" --> Round
+    Route -- "Yes" --> Final["final_answer"]
+    Final --> Synthesis["Synthesize final answer from agents + memory"]
+    Synthesis --> FinalEvents["Emit final_start, final_delta, final"]
+    FinalEvents --> End((END))
+  end
+
+  subgraph UI["React live graph and transcript"]
+    InitEvents -.->|SSE| UINode["Add/position agent node"]
+    AgentEvent -.->|SSE| UINode
+    Prompt -.->|message_start/message_delta| Transcript["Stream transcript item"]
+    Done -.->|message_done| Confidence["Update agent confidence"]
+    Edge -.->|SSE| UIEdge["Draw visible graph edge"]
+    ImageTask -.->|SSE| InlineImage["Attach generated image to message"]
+    FinalEvents -.->|SSE| FinalUI["Show final answer and stop run"]
+  end
+```
+
+In code, that server graph is built in `server/index.ts` as:
+
+```text
+START -> initialize_council -> discussion_round
+discussion_round -> discussion_round | final_answer
+final_answer -> END
+```
 
 ## Contributing
 
